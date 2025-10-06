@@ -1,0 +1,720 @@
+# ================== 1-QISM ==================
+import os
+import io
+import re
+import asyncio
+import logging
+from datetime import datetime, timedelta
+from typing import Optional
+import aiosqlite
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, FSInputFile
+)
+from aiogram.filters import Command
+from dotenv import load_dotenv
+
+# -------- CONFIG --------
+logging.basicConfig(level=logging.INFO)
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN env topilmadi")
+
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().lstrip("-").isdigit()]
+GROUP_IDS = [int(x) for x in os.getenv("PRIVATE_GROUP_ID", "").split(",") if x.strip().lstrip("-").isdigit()]
+
+SUBSCRIPTION_DAYS = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
+INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "1"))
+REMIND_DAYS = int(os.getenv("REMIND_DAYS", "3"))
+DB_PATH = os.getenv("DB_PATH", "/mnt/data/subs.db")
+TZ_OFFSET = timedelta(hours=5)
+
+bot = Bot(BOT_TOKEN)
+dp = Dispatcher()
+
+WAIT_CONTACT_FOR: set[int] = set()
+WAIT_FULLNAME_FOR: set[int] = set()
+WAIT_DATE_FOR: dict[int, int] = {}
+
+# -------- SHARTNOMA MATNI --------
+CONTRACT_TEXT = """📄 ONLAYN O‘QUV SHARTNOMA
+
+O‘rtasida:
+“Zamonaviy Ta’lim” MCHJ (bundan keyin “Markaz” deb yuritiladi)
+va
+O‘quvchi (bundan keyin “O‘quvchi” deb yuritiladi)
+
+1. SHARTNOMA MAQSADI
+Markaz tomonidan tashkil etilgan “CEFR Imtihoniga Bosqichma-bosqich Tayyorlovchi Video Kurs” dasturi doirasida o‘quvchining majburiyatlari, to‘lov tartibi va Markaz kafolatlari belgilanadi.
+
+2. KURS TASHKILOTI
+Darslar yopiq Telegram guruhlari orqali olib boriladi.
+Har bosqich uchun A1, A2, B1, B2 manbalar va vazifa guruhlari mavjud.
+
+3. O‘QUVCHINING MAJBURIYATLARI
+Darslarni muntazam kuzatib borish va faol ishtirok etish shart.
+To‘lovni belgilangan muddatda amalga oshirishi lozim.
+
+4. MARKAZNING MAJBURIYATLARI
+Markaz sifatli video darslar va materiallar bilan ta’minlaydi.
+Haftasiga kamida bitta jonli sessiya o‘tkazadi.
+
+5. TO‘LOV TARTIBI
+Kursning oylik to‘lovi 300 000 so‘m.
+To‘lov kurs uchun oldindan amalga oshiriladi.
+Qaytarish shartlari 30% xizmat haqi bilan amalga oshiriladi.
+
+6. KAFOLATLAR VA MA’SULIYAT
+O‘quvchi topshiriqlarni to‘liq bajargan taqdirda natijasi kafolatlanadi.
+
+7. SHARTNOMA KUCHI
+Kursga ro‘yxatdan o‘tgandan so‘ng kuchga kiradi va yakunida tugaydi.
+
+8. TOMONLARNING ROZILIGI
+“Tasdiqlayman” tugmasini bosish orqali o‘quvchi barcha shartlarga rozilik bildiradi.
+"""
+
+# -------- DATABASE --------
+CREATE_SQL = """
+CREATE TABLE IF NOT EXISTS users(
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    full_name TEXT,
+    phone TEXT,
+    group_id INTEGER,
+    expires_at INTEGER DEFAULT 0,
+    agreed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS payments(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    photo_file TEXT,
+    status TEXT,
+    created_at INTEGER,
+    admin_id INTEGER
+);
+"""
+
+def _ensure_db_dir():
+    d = os.path.dirname(DB_PATH)
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+async def db_init():
+    _ensure_db_dir()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executescript(CREATE_SQL)
+        await db.commit()
+
+# -------- DB HELPERS --------
+async def add_payment(user: Message, file_id: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO payments(user_id, photo_file, status, created_at) VALUES(?,?,?,?)",
+            (user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp()))
+        )
+        await db.commit()
+        cur = await db.execute("SELECT last_insert_rowid()")
+        row = await cur.fetchone()
+        return int(row[0])
+
+async def get_payment(pid: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT id, user_id, status FROM payments WHERE id=?", (pid,))
+        return await cur.fetchone()
+
+async def set_payment_status(pid: int, status: str, admin_id: Optional[int]):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE payments SET status=?, admin_id=? WHERE id=?", (status, admin_id, pid))
+        await db.commit()
+
+async def upsert_user(uid: int, username: str, full_name: str, phone: Optional[str], expires_at: int, group_id: int = 0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO users(user_id, username, full_name, phone, expires_at, group_id)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username=excluded.username,
+                full_name=COALESCE(excluded.full_name, users.full_name),
+                phone=COALESCE(excluded.phone, users.phone),
+                expires_at=excluded.expires_at,
+                group_id=excluded.group_id
+        """, (uid, username, full_name, phone, expires_at, group_id))
+        await db.commit()
+
+async def get_user(uid: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT * FROM users WHERE user_id=?", (uid,))
+        return await cur.fetchone()
+
+def is_admin(uid: int) -> bool:
+    return uid in ADMIN_IDS
+
+async def resolve_group_titles():
+    results = []
+    for gid in GROUP_IDS:
+        try:
+            chat = await bot.get_chat(gid)
+            title = chat.title or str(gid)
+        except Exception:
+            title = str(gid)
+        results.append((gid, title))
+    return results
+# ================== KEYBOARDS ==================
+def contract_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Tasdiqlayman", callback_data="terms_agree")],
+        [InlineKeyboardButton(text="❌ Rad etaman", callback_data="terms_decline")]
+    ])
+
+def start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Karta orqali to‘lov", callback_data="pay_card")],
+        [InlineKeyboardButton(text="🔗 Havola orqali to‘lov", callback_data="pay_link")],
+    ])
+
+def approve_keyboard(pid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Hoziroq tasdiqlash", callback_data=f"ap_now:{pid}")],
+        [InlineKeyboardButton(text="🗓 Sana bilan tasdiqlash", callback_data=f"ap_date:{pid}")],
+        [InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reject:{pid}")],
+    ])
+
+
+# ================== HELPERS (INVITE LINK) ==================
+async def send_one_time_link(group_id: int, user_id: int) -> str:
+    """Guruhga 1-martalik, vaqt cheklangan taklif havolasi yaratadi."""
+    expire = int((datetime.utcnow() + timedelta(hours=INVITE_LINK_EXPIRE_HOURS)).timestamp())
+    link = await bot.create_chat_invite_link(
+        chat_id=group_id,
+        name=f"sub-{user_id}",
+        expire_date=expire,
+        member_limit=1
+    )
+    return link.invite_link
+
+
+# ================== CONTRACT FLOW ==================
+@dp.message(Command("start"))
+async def cmd_start(m: Message):
+    # Foydalanuvchiga shartnoma ko‘rsatamiz
+    await m.answer(CONTRACT_TEXT, reply_markup=contract_keyboard())
+
+@dp.callback_query(F.data == "terms_agree")
+async def cb_terms_agree(c: CallbackQuery):
+    # Telefon raqamini MATN ko‘rinishida qabul qilamiz
+    WAIT_CONTACT_FOR.add(c.from_user.id)
+    await c.message.answer(
+        "✅ Shartnoma tasdiqlandi.\n\n"
+        "Iltimos, *telefon raqamingizni* kiriting (masalan: +998901234567 yoki 998901234567):",
+        parse_mode="Markdown"
+    )
+    await c.answer()
+
+@dp.callback_query(F.data == "terms_decline")
+async def cb_terms_decline(c: CallbackQuery):
+    await c.message.answer("❌ Shartnoma rad etildi. Kursdan foydalanish uchun shartnomani tasdiqlash zarur.")
+    await c.answer()
+
+# Telefonni qo‘lda matn ko‘rinishida qabul qilish (regex bilan tekshiradi)
+@dp.message(F.text.regexp(r"^\+?\d{9,15}$"))
+async def on_phone_text(m: Message):
+    if m.from_user.id not in WAIT_CONTACT_FOR:
+        return
+    WAIT_CONTACT_FOR.discard(m.from_user.id)
+    phone = m.text.strip()
+
+    # Ism-familiyani keyingi qadamda olamiz
+    WAIT_FULLNAME_FOR.add(m.from_user.id)
+    await m.answer("📛 Endi ism va familiyangizni yozing (masalan: Hasanov Alisher):")
+
+    # Foydalanuvchini ro‘yxatdan o‘tkazib qo‘yamiz (username va phone saqlanadi)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO users(user_id, username, full_name, phone, group_id, expires_at, agreed_at)
+            VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username=excluded.username,
+                phone=excluded.phone,
+                agreed_at=excluded.agreed_at
+        """, (
+            m.from_user.id,
+            m.from_user.username,
+            "",            # full_name keyin to‘ldiriladi
+            phone,
+            0,             # group tanlanmagan
+            0,             # expires yo‘q
+            int(datetime.utcnow().timestamp())
+        ))
+        await db.commit()
+
+# Ism-familiyani qabul qilish
+@dp.message(F.text.func(lambda t: t and len(t.strip()) >= 3))
+async def on_fullname_text(m: Message):
+    if m.from_user.id not in WAIT_FULLNAME_FOR:
+        return
+    WAIT_FULLNAME_FOR.discard(m.from_user.id)
+    fullname = m.text.strip()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET full_name=? WHERE user_id=?", (fullname, m.from_user.id))
+        await db.commit()
+
+    await m.answer("✅ Ma’lumotlar saqlandi. Endi to‘lov turini tanlang:", reply_markup=start_keyboard())
+
+
+# ================== PAYMENT FLOW ==================
+@dp.callback_query(F.data == "pay_card")
+async def cb_pay_card(c: CallbackQuery):
+    await c.message.answer(
+        "💳 Karta: *9860 1601 3084 7827* — H.Halikova\n\n"
+        "To‘lovdan so‘ng *chek rasmini* shu yerga yuboring.",
+        parse_mode="Markdown"
+    )
+    await c.answer()
+
+@dp.callback_query(F.data == "pay_link")
+async def cb_pay_link(c: CallbackQuery):
+    await c.message.answer(
+        "🔗 To‘lov havolalari:\n"
+        "• Payme: https://payme.uz/fallback/merchant/?id=68aebaff42ec20bb02a46c8c\n"
+        "• Click: https://indoor.click.uz/pay?id=081968&t=0\n\n"
+        "To‘lovdan so‘ng *chek rasmini* shu yerga yuboring.",
+        parse_mode="Markdown"
+    )
+    await c.answer()
+
+@dp.message(F.photo)
+async def on_photo(m: Message):
+    pid = await add_payment(m, m.photo[-1].file_id)
+    await m.answer("✅ Chekingiz qabul qilindi. Admin tasdiqlaydi.")
+
+    caption = (
+        f"🧾 Yangi to‘lov\n"
+        f"👤 {m.from_user.full_name} (@{m.from_user.username or 'no_username'})\n"
+        f"🆔 ID: {m.from_user.id}\n"
+        f"💳 Payment ID: {pid}"
+    )
+    kb = approve_keyboard(pid)
+
+    if not ADMIN_IDS:
+        await m.answer("⚠️ Adminlar ro‘yxati bo‘sh. Kamida bitta admin botni /start bilan ishga tushirsin.")
+        return
+
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_photo(aid, m.photo[-1].file_id, caption=caption, reply_markup=kb)
+        except Exception as e:
+            logging.warning(f"Admin {aid}ga yuborilmadi: {e}")
+
+
+# ================== ADMIN APPROVE (SANA TANLASH) ==================
+@dp.callback_query(F.data.startswith("ap_now:"))
+async def cb_ap_now(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat admin uchun", show_alert=True)
+
+    pid = int(c.data.split(":")[1])
+
+    # to‘lov mavjudligini tekshirish
+    row = await get_payment(pid)
+    if not row:
+        return await c.answer("❌ To‘lov topilmadi", show_alert=True)
+    _pid, _uid, status = row
+    if status == "approved":
+        return await c.answer("⚠️ Bu to‘lov allaqachon tasdiqlangan.", show_alert=True)
+
+    # Sana kiritishni so‘raymiz
+    WAIT_DATE_FOR[c.from_user.id] = pid
+    await c.message.answer("🗓 Boshlanish sanasini kiriting: *YYYY-MM-DD* (masalan 2025-10-08)", parse_mode="Markdown")
+    await c.answer()
+
+@dp.callback_query(F.data.startswith("ap_date:"))
+async def cb_ap_date(c: CallbackQuery):
+    # Bu ham ap_now bilan bir xil — sanani qo‘lda kiritish oqimi
+    return await cb_ap_now(c)
+
+# Sana matnini qabul qilish va GURUH TANLASH TUGMALARINI chiqarish
+@dp.message(F.text.regexp(r"^\d{4}-\d{2}-\d{2}$"))
+async def on_admin_date(m: Message):
+    if m.from_user.id not in WAIT_DATE_FOR:
+        return
+
+    pid = WAIT_DATE_FOR.pop(m.from_user.id)
+    try:
+        start_dt = datetime.strptime(m.text.strip(), "%Y-%m-%d")
+    except ValueError:
+        return await m.answer("❌ Format xato. Masalan: 2025-10-08")
+
+    # To‘lov tekshiruvi
+    row = await get_payment(pid)
+    if not row:
+        return await m.answer("❌ To‘lov topilmadi.")
+    _pid, user_id, status = row
+    if status == "approved":
+        return await m.answer("⚠️ Bu to‘lov allaqachon tasdiqlangan.")
+
+    # Tugash sanasi tayyorlab qo‘yiladi (SUBSCRIPTION_DAYS asosida)
+    exp_ts = int((start_dt + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+
+    # Guruh tanlash tugmalarini chiqaramiz (callbackda exp_ts ham uzatiladi!)
+    groups = await resolve_group_titles()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=title, callback_data=f"pick_group:{pid}:{gid}:{exp_ts}")]
+            for gid, title in groups
+        ]
+    )
+    await m.answer("✅ Sana qabul qilindi.\n\n🧭 Endi guruhni tanlang:", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("pick_group:"))
+async def cb_pick_group(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat admin uchun", show_alert=True)
+
+    # callback_data: pick_group:{pid}:{gid}:{exp_ts}
+    parts = c.data.split(":")
+    if len(parts) != 4:
+        return await c.answer("❌ Callback noto‘g‘ri", show_alert=True)
+
+    _, pid_s, gid_s, exp_s = parts
+    pid = int(pid_s)
+    gid = int(gid_s)
+    exp_ts = int(exp_s)
+
+    # To‘lovni tekshiramiz
+    row = await get_payment(pid)
+    if not row:
+        return await c.answer("❌ To‘lov topilmadi", show_alert=True)
+    _pid, user_id, status = row
+    if status == "approved":
+        return await c.answer("⚠️ Bu to‘lov allaqachon tasdiqlangan.", show_alert=True)
+
+    # User ma’lumotlarini yangilaymiz va to‘lovni tasdiqlaymiz
+    await set_payment_status(pid, "approved", c.from_user.id)
+    await upsert_user(
+        uid=user_id,
+        username=(await bot.get_chat(user_id)).username,
+        full_name="",      # o‘zgarmaydi
+        phone=None,        # o‘zgarmaydi
+        expires_at=exp_ts,
+        group_id=gid
+    )
+
+    # 1-martalik taklif havolasi
+    try:
+        link = await send_one_time_link(gid, user_id)
+    except Exception as e:
+        await c.message.answer(f"❌ Taklif havolasi yaratishda xatolik: {e}")
+        return await c.answer()
+
+    human_exp = (datetime.utcfromtimestamp(exp_ts) + TZ_OFFSET).strftime("%Y-%m-%d")
+    try:
+        await bot.send_message(
+            user_id,
+            "✅ To‘lov tasdiqlandi!\n"
+            f"🔗 Guruhga kirish havolasi (1 martalik, {INVITE_LINK_EXPIRE_HOURS} soat ichida):\n{link}\n\n"
+            f"⏳ Obuna tugash sanasi: {human_exp}"
+        )
+    except Exception:
+        pass
+
+    await c.message.answer("✅ Tasdiqlandi va havola yuborildi.")
+    await c.answer()
+
+
+# ================== REJECT ==================
+@dp.callback_query(F.data.startswith("reject:"))
+async def cb_reject(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat admin uchun", show_alert=True)
+
+    pid = int(c.data.split(":")[1])
+    await set_payment_status(pid, "rejected", c.from_user.id)
+    await c.message.answer("❌ To‘lov rad etildi.")
+    await c.answer()
+# ================== ADMIN WARN TUGMALARI ==================
+def warn_keyboard(uid: int, gid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ To‘lov qildi", callback_data=f"warn_paid:{uid}:{gid}"),
+            InlineKeyboardButton(text="⌛ Qilmadi", callback_data=f"warn_notpaid:{uid}:{gid}")
+        ],
+        [
+            InlineKeyboardButton(text="❌ Chiqarib yubor", callback_data=f"warn_kick:{uid}:{gid}")
+        ]
+    ])
+
+
+# ================== YORDAMCHI FUNKSIYALAR ==================
+def human_left(expires_at: int) -> tuple[str, int]:
+    """YYYY-MM-DD (local) va qolgan kun."""
+    if not expires_at:
+        return "belgilanmagan", 0
+    dt_utc = datetime.utcfromtimestamp(expires_at)
+    dt_loc = dt_utc + TZ_OFFSET
+    days_left = (dt_loc.date() - (datetime.utcnow() + TZ_OFFSET).date()).days
+    return dt_loc.strftime("%Y-%m-%d"), days_left
+
+
+# ================== STATS ==================
+@dp.message(Command("stats"))
+async def cmd_stats(m: Message):
+    if not is_admin(m.from_user.id):
+        return await m.answer("⛔ Bu buyruq faqat adminlar uchun.")
+    now = int(datetime.utcnow().timestamp())
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM users")
+        total = (await cur.fetchone())[0]
+        cur = await db.execute("SELECT COUNT(*) FROM users WHERE expires_at > ?", (now,))
+        active = (await cur.fetchone())[0]
+        cur = await db.execute("SELECT COUNT(*) FROM users WHERE expires_at <= ? AND expires_at>0", (now,))
+        expired = (await cur.fetchone())[0]
+
+    await m.answer(
+        "📊 *Umumiy statistika*\n"
+        f"👥 Jami: {total}\n"
+        f"✅ Aktiv: {active}\n"
+        f"⚠️ Tugagan: {expired}\n\n"
+        "📚 Guruhlar kesimi:",
+        parse_mode="Markdown"
+    )
+
+    titles = dict(await resolve_group_titles())
+    for gid in GROUP_IDS:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute(
+                "SELECT user_id, username, full_name, phone, expires_at FROM users WHERE group_id=? ORDER BY expires_at DESC",
+                (gid,)
+            )
+            rows = await cur.fetchall()
+        title = titles.get(gid, str(gid))
+        if not rows:
+            await m.answer(f"🏷 {title} — 0 a’zo")
+            continue
+
+        lines = [f"🏷 {title} — {len(rows)} a’zo:"]
+        for i, (uid, username, full_name, phone, exp) in enumerate(rows, start=1):
+            tag = f"@{username}" if username else (full_name or str(uid))
+            exp_str, left = human_left(exp)
+            phone_s = f" 📞 {phone}" if phone else ""
+            lines.append(f"{i}. {tag}{phone_s} — ⏳ {exp_str} (qoldi: {max(left,0)} kun)")
+        await m.answer("\n".join(lines))
+
+
+@dp.message(Command("gstats"))
+async def cmd_gstats(m: Message):
+    """Batafsil guruh statistikasi: foydalanuvchi, telefon, tugash sanasi."""
+    if not is_admin(m.from_user.id):
+        return await m.answer("⛔ Bu buyruq faqat adminlar uchun.")
+
+    titles = dict(await resolve_group_titles())
+    for gid in GROUP_IDS:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute(
+                "SELECT user_id, username, full_name, phone, expires_at FROM users WHERE group_id=? ORDER BY expires_at DESC",
+                (gid,)
+            )
+            rows = await cur.fetchall()
+        title = titles.get(gid, str(gid))
+        if not rows:
+            await m.answer(f"🏷 {title} — 0 a’zo")
+            continue
+
+        buf = [f"📚 *{title}* — {len(rows)} a’zo\n"]
+        for i, (uid, username, full_name, phone, exp) in enumerate(rows, start=1):
+            tag = f"@{username}" if username else (full_name or str(uid))
+            exp_str, left = human_left(exp)
+            buf.append(f"{i}. {tag} | 📞 {phone or '-'} | ⏳ {exp_str} ({left} kun)")
+        await m.answer("\n".join(buf), parse_mode="Markdown")
+
+
+# ================== AUTO-WARN (ADMIN TUGMALARI BILAN) ==================
+_WARNED_CACHE: dict[tuple[int, int, str], int] = {}  # (uid, gid, reason) -> ts
+
+async def _warn_user_and_admin(uid: int, gid: int, exp_ts: int, reason: str):
+    """
+    reason: 'soon' yoki 'expired'
+    O‘quvchiga xabar, adminlarga 3 tugmali xabar yuboradi. 1 soat ichida takrorlamaydi.
+    """
+    now_ts = int(datetime.utcnow().timestamp())
+    cache_key = (uid, gid or 0, reason)
+    if now_ts - _WARNED_CACHE.get(cache_key, 0) < 3600:
+        return
+    _WARNED_CACHE[cache_key] = now_ts
+
+    exp_str, left = human_left(exp_ts)
+    # O‘quvchiga eslatma
+    if reason == "soon":
+        msg_user = (
+            "⏰ Obunangiz yaqin kunlarda tugaydi.\n"
+            f"⏳ Tugash sanasi: {exp_str}\n"
+            f"📆 Qolgan kun: {max(left,0)}\n\n"
+            "Iltimos, to‘lovni yangilang va chekni shu botga yuboring."
+        )
+    else:
+        msg_user = (
+            "⚠️ Obunangiz muddati tugagan.\n"
+            f"⏳ Tugash sanasi: {exp_str}\n"
+            "Iltimos, to‘lovni yangilang va chekni shu botga yuboring."
+        )
+    try:
+        await bot.send_message(uid, msg_user)
+    except Exception:
+        pass
+
+    # Adminlarga 3 tugma bilan
+    try:
+        user = await bot.get_chat(uid)
+        uname = f"@{user.username}" if user.username else (user.first_name or str(uid))
+    except Exception:
+        uname = str(uid)
+
+    titles = dict(await resolve_group_titles())
+    gtitle = titles.get(gid, str(gid))
+
+    admin_title = "⏰ *Obuna tugash arafasida*" if reason == "soon" else "⚠️ *Obuna muddati tugagan*"
+    msg_admin = (
+        f"{admin_title}\n"
+        f"• Foydalanuvchi: {uname}\n"
+        f"• ID: `{uid}`\n"
+        f"• Guruh: {gtitle} (`{gid}`)\n"
+        f"• Tugash: {exp_str}\n\n"
+        "Quyidagi tugmalardan birini tanlang:"
+    )
+    kb = warn_keyboard(uid, gid)
+
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_message(aid, msg_admin, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            pass
+
+
+async def auto_warn_loop():
+    """Muddati yaqin/tugagan obunachilarni aniqlab, o‘quvchi va adminlarga xabar yuboradi."""
+    await asyncio.sleep(5)
+    while True:
+        try:
+            now = int(datetime.utcnow().timestamp())
+            upper = now + REMIND_DAYS * 86400
+
+            # Yaqin tugaydiganlar (soon)
+            async with aiosqlite.connect(DB_PATH) as db:
+                cur = await db.execute(
+                    "SELECT user_id, group_id, expires_at FROM users "
+                    "WHERE expires_at> ? AND expires_at <= ? AND group_id IS NOT NULL",
+                    (now, upper)
+                )
+                soon_rows = await cur.fetchall()
+
+            for uid, gid, exp_ts in soon_rows:
+                await _warn_user_and_admin(uid, gid, exp_ts, reason="soon")
+
+            # Allaqachon tugaganlar (expired)
+            async with aiosqlite.connect(DB_PATH) as db:
+                cur = await db.execute(
+                    "SELECT user_id, group_id, expires_at FROM users "
+                    "WHERE expires_at>0 AND expires_at <= ? AND group_id IS NOT NULL",
+                    (now,)
+                )
+                expired_rows = await cur.fetchall()
+
+            for uid, gid, exp_ts in expired_rows:
+                await _warn_user_and_admin(uid, gid, exp_ts, reason="expired")
+
+            await asyncio.sleep(60)  # har 1 daqiqa tekshiradi
+        except Exception as e:
+            logging.exception(e)
+            await asyncio.sleep(10)
+
+
+# ================== ADMIN TUGMALARI HANDLERLARI ==================
+@dp.callback_query(F.data.startswith("warn_paid:"))
+async def cb_warn_paid(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat admin uchun", show_alert=True)
+    _, uid_s, gid_s = c.data.split(":")
+    uid, gid = int(uid_s), int(gid_s)
+
+    new_exp = int((datetime.utcnow() + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET expires_at=? WHERE user_id=?", (new_exp, uid))
+        await db.commit()
+
+    exp_str, _ = human_left(new_exp)
+    # Foydalanuvchiga xabar
+    try:
+        await bot.send_message(uid, f"✅ To‘lov tasdiqlandi. Obunangiz yangilandi.\n⏳ Yangi tugash sanasi: {exp_str}")
+    except Exception:
+        pass
+
+    await c.message.answer(f"✅ {uid} uchun obuna {SUBSCRIPTION_DAYS} kunga uzaytirildi. Yangi sana: {exp_str}")
+    await c.answer("Tasdiqlandi")
+
+@dp.callback_query(F.data.startswith("warn_notpaid:"))
+async def cb_warn_notpaid(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat admin uchun", show_alert=True)
+    _, uid_s, gid_s = c.data.split(":")
+    uid, gid = int(uid_s), int(gid_s)
+
+    await c.message.answer(f"⌛ {uid} — hali to‘lov qilmagan deb qayd etildi.")
+    try:
+        await bot.send_message(uid, "⌛ To‘lovingiz hali tasdiqlanmadi. Iltimos, chekni yuboring yoki to‘lovni amalga oshiring.")
+    except Exception:
+        pass
+    await c.answer("Qayd etildi")
+
+@dp.callback_query(F.data.startswith("warn_kick:"))
+async def cb_warn_kick(c: CallbackQuery):
+    if not is_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat admin uchun", show_alert=True)
+    _, uid_s, gid_s = c.data.split(":")
+    uid, gid = int(uid_s), int(gid_s)
+
+    # Admin/owner bo‘lsa, chiqarilmaydi
+    try:
+        member = await bot.get_chat_member(gid, uid)
+        if member.status in ("administrator", "creator"):
+            await c.message.answer("❗ Bu foydalanuvchi guruhda admin/egadir. Chiqarib bo‘lmaydi.")
+            return await c.answer()
+    except Exception:
+        pass
+
+    # Chiqarish va DB dagi group_id’ni tozalash
+    try:
+        await bot.ban_chat_member(gid, uid)
+        await bot.unban_chat_member(gid, uid)
+    except Exception:
+        pass
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET group_id=NULL WHERE user_id=? AND group_id=?", (uid, gid))
+        await db.commit()
+
+    await c.message.answer(f"❌ {uid} guruhdan chiqarildi.")
+    try:
+        await bot.send_message(uid, "❌ Obuna yangilanmagani sababli guruhdan chiqarildingiz.")
+    except Exception:
+        pass
+    await c.answer("Chiqarildi")
+
+
+# ================== MAIN ==================
+async def main():
+    await db_init()
+    # Auto-WARN (kick emas) — har daqiqada tekshiradi va tugmalar yuboradi
+    asyncio.create_task(auto_warn_loop())
+    logging.info("🤖 Bot ishga tushdi!")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
