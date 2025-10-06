@@ -498,7 +498,10 @@ async def on_admin_date_handler(m: Message):
             except Exception as e:
                 logger.error(f"Error processing phone text: {e}")
                 await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
-            return
+        return
+    
+    if m.from_user.id in WAIT_FULLNAME_FOR:
+        return
 
 @dp.message(F.contact)
 async def on_contact(m: Message):
