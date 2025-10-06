@@ -62,6 +62,7 @@ WAIT_DATE_FOR: dict[int, int] = {}
 MULTI_PICK: dict[int, dict] = {}
 WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
+NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 
 CONTRACT_TEXT = """ONLAYN O'QUV SHARTNOMA
 
@@ -468,6 +469,51 @@ async def cb_terms_decline(c: CallbackQuery):
 @dp.message(Command("myid"))
 async def cmd_myid(m: Message):
     await m.answer(f"🆔 Sizning Telegram ID: `{m.from_user.id}`", parse_mode="Markdown")
+
+@dp.message(Command("expiring"))
+async def cmd_expiring(m: Message):
+    """Obunasi yaqin kunlarda tugaydigan foydalanuvchilarni ko'rsatish."""
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        soon_users = []
+        for uid, gid, exp_at in await soon_expiring_users(REMIND_DAYS):
+            row = await get_user(uid)
+            if row:
+                _uid, _gid, _exp, username, full_name, phone, _ag = row
+                exp_str, left = human_left(exp_at)
+                soon_users.append((uid, gid, exp_at, username, full_name, left))
+        
+        for uid, gid, exp_at in await soon_expiring_user_groups(REMIND_DAYS):
+            row = await get_user(uid)
+            if row:
+                _uid, _gid, _exp, username, full_name, phone, _ag = row
+                exp_str, left = human_left(exp_at)
+                soon_users.append((uid, gid, exp_at, username, full_name, left))
+        
+        if not soon_users:
+            return await m.answer(f"✅ Keyingi {REMIND_DAYS} kun ichida obunasi tugaydigan foydalanuvchilar yo'q.")
+        
+        soon_users.sort(key=lambda x: x[2])
+        titles = dict(await resolve_group_titles())
+        
+        lines = [f"⏰ *Obunasi yaqin kunlarda tugaydiganlar* (keyingi {REMIND_DAYS} kun):\n"]
+        for uid, gid, exp_at, username, full_name, left in soon_users[:20]:
+            exp_str, _ = human_left(exp_at)
+            tag = f"@{username}" if username else full_name or str(uid)
+            gtitle = titles.get(gid, str(gid))
+            lines.append(f"• {tag} (ID: `{uid}`)")
+            lines.append(f"  Guruh: {gtitle}")
+            lines.append(f"  Tugash: {exp_str} ({left} kun qoldi)\n")
+        
+        if len(soon_users) > 20:
+            lines.append(f"... va yana {len(soon_users)-20} ta")
+        
+        await m.answer("\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error in cmd_expiring: {e}")
+        await m.answer("Xatolik yuz berdi.")
 
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
@@ -1067,10 +1113,41 @@ async def cb_warn_paid(c: CallbackQuery):
 async def cb_warn_notpaid(c: CallbackQuery):
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
-    parts = c.data.split(":")
-    uid = int(parts[1]); gid = int(parts[2])
-    await c.message.answer(f"⌛ Foydalanuvchi {uid} hali to'lov qilmagan deb qayd etildi.")
-    await c.answer("Qayd etildi")
+    try:
+        parts = c.data.split(":")
+        uid = int(parts[1]); gid = int(parts[2])
+        key = (uid, gid)
+        count = NOT_PAID_COUNTER.get(key, 0) + 1
+        NOT_PAID_COUNTER[key] = count
+        
+        if count >= 3:
+            try:
+                member = await bot.get_chat_member(gid, uid)
+                if member.status in ("administrator", "creator"):
+                    await c.message.answer("❗ Bu foydalanuvchi guruhda admin/egadir. Chiqarib bo'lmaydi.")
+                    return await c.answer()
+            except Exception:
+                pass
+            try:
+                await bot.ban_chat_member(gid, uid)
+                await bot.unban_chat_member(gid, uid)
+                await clear_user_group(uid, gid)
+                await clear_user_group_extra(uid, gid)
+                NOT_PAID_COUNTER.pop(key, None)
+                await c.message.answer(f"❌ {uid} 3 marta to'lov qilmagan. Guruhdan chiqarildi.")
+                try:
+                    await bot.send_message(uid, "❌ 3 marta to'lov qilmaganingiz sababli guruhdan chiqarildingiz.")
+                except Exception as e:
+                    logger.warning(f"Failed to notify kicked user {uid}: {e}")
+            except Exception as e:
+                await c.message.answer(f"Chiqarishda xato: {e}")
+            await c.answer("Guruhdan chiqarildi")
+        else:
+            await c.message.answer(f"⌛ Foydalanuvchi {uid} hali to'lov qilmagan deb qayd etildi. ({count}/3)")
+            await c.answer(f"Qayd etildi ({count}/3)")
+    except Exception as e:
+        logger.error(f"Error in cb_warn_notpaid: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("warn_kick:"))
 async def cb_warn_kick(c: CallbackQuery):
