@@ -12,6 +12,9 @@ This is a Telegram bot application built using the aiogram framework (Python). T
 - Improved `/gstats` command to show comprehensive details: username, ID, phone, subscription dates for each member
 - Fixed invite link generation to be truly one-time use with `member_limit=1`
 - Streamlined user registration flow for better UX
+- **Added auto-kick after 3 "not paid" warnings** - Admin can mark user as "not paid" 3 times, then user is automatically kicked
+- **Added `/expiring` command** - Shows list of users whose subscriptions are expiring soon (configurable days)
+- **Created Replit PostgreSQL database** - Available for future migration from SQLite for persistent storage
 
 # User Preferences
 
@@ -89,10 +92,11 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - `/groups` - List of configured groups with names and IDs
 - `/stats` - Quick statistics: total users, active subscriptions, expired, and summary per group
 - `/gstats` - **Detailed statistics**: Full member list for each group showing username, ID, phone number, and subscription expiry dates
+- `/expiring` - **NEW**: Shows users whose subscriptions are expiring soon (next N days based on REMIND_DAYS)
 - Payment approval with immediate or custom start date
 - Single or multi-group assignment per user
 - Subscription renewal and management
-- Automatic expiry warnings with action buttons
+- Automatic expiry warnings with action buttons: "To'lov qilgan" (paid), "Qilmagan" (not paid - kicks after 3 times), "Guruhdan chiqarish" (kick immediately)
 
 ### Automation
 - Auto-kick loop runs every 60 seconds
