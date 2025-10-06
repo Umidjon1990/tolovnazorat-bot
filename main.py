@@ -493,12 +493,46 @@ async def on_admin_date_handler(m: Message):
                 phone = m.text.strip()
                 await update_user_phone(m.from_user.id, phone)
                 WAIT_CONTACT_FOR.discard(m.from_user.id)
-                
-                full_name = (m.from_user.first_name or "") + (" " + (m.from_user.last_name or "") if m.from_user.last_name else "")
-                full_name = full_name.strip() or f"User{m.from_user.id}"
-                await update_user_fullname(m.from_user.id, full_name)
-                
-                txt_buf, pdf_buf = build_contract_files(full_name, phone)
+                WAIT_FULLNAME_FOR.add(m.from_user.id)
+                await m.answer("✅ Telefon raqam qabul qilindi.\n\n📛 Endi *ism va familiyangizni* yozing (masalan: Hasanov Alisher):", parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Error processing phone text: {e}")
+                await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+        return
+    
+    if m.from_user.id in WAIT_FULLNAME_FOR:
+        return
+
+@dp.message(F.contact)
+async def on_contact(m: Message):
+    if m.from_user.id not in WAIT_CONTACT_FOR:
+        return
+    try:
+        contact = m.contact
+        phone = contact.phone_number
+        await update_user_phone(m.from_user.id, phone)
+        WAIT_CONTACT_FOR.discard(m.from_user.id)
+        WAIT_FULLNAME_FOR.add(m.from_user.id)
+        await m.answer("✅ Telefon raqam qabul qilindi.\n\n📛 Endi *ism va familiyangizni* yozing (masalan: Hasanov Alisher):", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error in on_contact: {e}")
+        await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+
+@dp.message(F.text.func(lambda t: bool(t) and len(t.strip()) >= 3))
+async def on_fullname_text(m: Message):
+    if m.from_user.id in WAIT_FULLNAME_FOR:
+        try:
+            fullname = m.text.strip()
+            await update_user_fullname(m.from_user.id, fullname)
+            WAIT_FULLNAME_FOR.discard(m.from_user.id)
+            
+            user_row = await get_user(m.from_user.id)
+            phone = None
+            if user_row:
+                _uid, _gid, _exp, _username, _full, phone, _ag = user_row
+            
+            if phone:
+                txt_buf, pdf_buf = build_contract_files(fullname, phone)
                 try:
                     await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
                     if pdf_buf:
@@ -515,57 +549,13 @@ async def on_admin_date_handler(m: Message):
                         logger.info(f"Contract documents sent to admin {aid}")
                     except Exception as e:
                         logger.error(f"Failed to send contract documents to admin {aid}: {e}")
-                
-                await m.answer("✅ Telefon raqam qabul qilindi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
-            except Exception as e:
-                logger.error(f"Error processing phone text: {e}")
-                await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
-        return
-
-@dp.message(F.contact)
-async def on_contact(m: Message):
-    if m.from_user.id not in WAIT_CONTACT_FOR:
-        return
-    try:
-        contact = m.contact
-        phone = contact.phone_number
-        await update_user_phone(m.from_user.id, phone)
-        WAIT_CONTACT_FOR.discard(m.from_user.id)
-        
-        full_name = ""
-        if contact.first_name:
-            full_name = contact.first_name
-            if contact.last_name:
-                full_name += " " + contact.last_name
-        if not full_name:
-            full_name = (m.from_user.first_name or "") + (" " + (m.from_user.last_name or "") if m.from_user.last_name else "")
-            full_name = full_name.strip()
-        if not full_name:
-            full_name = f"User{m.from_user.id}"
-        await update_user_fullname(m.from_user.id, full_name)
-        
-        txt_buf, pdf_buf = build_contract_files(full_name, phone)
-        try:
-            await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
-            if pdf_buf:
-                await bot.send_document(m.from_user.id, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
-            logger.info(f"Contract documents sent to user {m.from_user.id}")
+            else:
+                logger.warning(f"No phone number for user {m.from_user.id}, skipping contract generation")
+            
+            await m.answer("✅ Ma'lumotlaringiz qabul qilindi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
         except Exception as e:
-            logger.error(f"Failed to send contract documents to user: {e}")
-        
-        for aid in ADMIN_IDS:
-            try:
-                await bot.send_document(aid, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
-                if pdf_buf:
-                    await bot.send_document(aid, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
-                logger.info(f"Contract documents sent to admin {aid}")
-            except Exception as e:
-                logger.error(f"Failed to send contract documents to admin {aid}: {e}")
-        
-        await m.answer("✅ Telefon raqam qabul qilindi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
-    except Exception as e:
-        logger.error(f"Error in on_contact: {e}")
-        await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+            logger.error(f"Error in on_fullname_text: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
 
 
 @dp.callback_query(F.data == "pay_card")
