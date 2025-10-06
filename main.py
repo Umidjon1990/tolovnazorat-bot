@@ -471,7 +471,6 @@ async def cmd_myid(m: Message):
 
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
-    logger.info(f"/groups command from user {m.from_user.id}")
     if not is_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     if not GROUP_IDS:
@@ -482,13 +481,8 @@ async def cmd_groups(m: Message):
 
 @dp.message(Command("stats"))
 async def cmd_stats(m: Message):
-    logger.info(f"/stats command from user {m.from_user.id}")
-    logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
-    logger.info(f"Is admin: {is_admin(m.from_user.id)}")
-    logger.info(f"GROUP_IDS: {GROUP_IDS}")
-    
     if not is_admin(m.from_user.id):
-        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}\nAdmin IDs: {ADMIN_IDS}\n\nAgar adminga kiritmoqchi bo'lsangiz, ADMIN_IDS env'iga ID qo'shing.")
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}\nAdmin IDs: {ADMIN_IDS}")
     if not GROUP_IDS:
         return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
     
@@ -542,10 +536,6 @@ async def cmd_stats(m: Message):
 @dp.message(Command("gstats"))
 async def cmd_gstats(m: Message):
     """Batafsil guruh statistikasi: foydalanuvchi, telefon, tugash sanasi."""
-    logger.info(f"/gstats command from user {m.from_user.id}")
-    logger.info(f"Is admin: {is_admin(m.from_user.id)}")
-    logger.info(f"GROUP_IDS count: {len(GROUP_IDS)}")
-    
     if not is_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}\nAdmin IDs: {ADMIN_IDS}")
     
