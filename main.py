@@ -553,24 +553,30 @@ async def on_fullname_text(m: Message):
             WAIT_FULLNAME_FOR.discard(m.from_user.id)
             
             user_row = await get_user(m.from_user.id)
+            phone = None
             if user_row:
                 _uid, _gid, _exp, _username, _full, phone, _ag = user_row
-                if phone:
-                    txt_buf, pdf_buf = build_contract_files(fullname, phone)
+            
+            if phone:
+                txt_buf, pdf_buf = build_contract_files(fullname, phone)
+                try:
+                    await bot.send_document(m.from_user.id, FSInputFile(txt_buf, filename=txt_buf.name))
+                    if pdf_buf:
+                        await bot.send_document(m.from_user.id, FSInputFile(pdf_buf, filename=pdf_buf.name))
+                    logger.info(f"Contract documents sent to user {m.from_user.id}")
+                except Exception as e:
+                    logger.error(f"Failed to send contract documents to user: {e}")
+                
+                for aid in ADMIN_IDS:
                     try:
-                        await bot.send_document(m.from_user.id, FSInputFile(txt_buf, filename=txt_buf.name))
+                        await bot.send_document(aid, FSInputFile(io.BytesIO(txt_buf.getvalue()), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
                         if pdf_buf:
-                            await bot.send_document(m.from_user.id, FSInputFile(pdf_buf, filename=pdf_buf.name))
+                            await bot.send_document(aid, FSInputFile(io.BytesIO(pdf_buf.getvalue()), filename="shartnoma.pdf"))
+                        logger.info(f"Contract documents sent to admin {aid}")
                     except Exception as e:
-                        logger.warning(f"Failed to send contract documents to user: {e}")
-                    
-                    for aid in ADMIN_IDS:
-                        try:
-                            await bot.send_document(aid, FSInputFile(io.BytesIO(txt_buf.getvalue()), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
-                            if pdf_buf:
-                                await bot.send_document(aid, FSInputFile(io.BytesIO(pdf_buf.getvalue()), filename="shartnoma.pdf"))
-                        except Exception as e:
-                            logger.warning(f"Failed to send contract documents to admin {aid}: {e}")
+                        logger.error(f"Failed to send contract documents to admin {aid}: {e}")
+            else:
+                logger.warning(f"No phone number for user {m.from_user.id}, skipping contract generation")
             
             await m.answer("✅ Ism familiya saqlandi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
         except Exception as e:
