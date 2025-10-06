@@ -837,20 +837,26 @@ async def cb_reject(c: CallbackQuery):
 
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
+    logger.info(f"/groups command from user {m.from_user.id}")
     if not is_admin(m.from_user.id):
-        return
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     if not GROUP_IDS:
-        return await m.answer("PRIVATE_GROUP_ID bo'sh. Railway Variablesga kiriting.")
+        return await m.answer("PRIVATE_GROUP_ID bo'sh. Secrets'ga kiriting.")
     rows = await resolve_group_titles()
     txt = "🔗 Ulangan guruhlar:\n" + "\n".join([f"• {t} — {gid}" for gid, t in rows])
     await m.answer(txt)
 
 @dp.message(Command("stats"))
 async def cmd_stats(m: Message):
+    logger.info(f"/stats command from user {m.from_user.id}")
+    logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
+    logger.info(f"Is admin: {is_admin(m.from_user.id)}")
+    logger.info(f"GROUP_IDS: {GROUP_IDS}")
+    
     if not is_admin(m.from_user.id):
-        return await m.answer("⛔ Bu buyruq faqat adminlar uchun. Agar adminga kiritmoqchi bo'lsangiz, ADMIN_IDS env'iga ID qo'shing.\nID olish: /myid")
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}\nAdmin IDs: {ADMIN_IDS}\n\nAgar adminga kiritmoqchi bo'lsangiz, ADMIN_IDS env'iga ID qo'shing.")
     if not GROUP_IDS:
-        return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Railway > Variables da guruh chat_id'larini kiriting (vergul bilan).")
+        return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
     
     now = int(datetime.utcnow().timestamp())
     try:
@@ -902,8 +908,12 @@ async def cmd_stats(m: Message):
 @dp.message(Command("gstats"))
 async def cmd_gstats(m: Message):
     """Batafsil guruh statistikasi: foydalanuvchi, telefon, tugash sanasi."""
+    logger.info(f"/gstats command from user {m.from_user.id}")
+    logger.info(f"Is admin: {is_admin(m.from_user.id)}")
+    logger.info(f"GROUP_IDS count: {len(GROUP_IDS)}")
+    
     if not is_admin(m.from_user.id):
-        return await m.answer("⛔ Bu buyruq faqat adminlar uchun.")
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}\nAdmin IDs: {ADMIN_IDS}")
     
     if not GROUP_IDS:
         return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
