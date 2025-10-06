@@ -465,6 +465,27 @@ async def cb_terms_decline(c: CallbackQuery):
     await c.message.answer("❌ Shartnoma rad etildi. Xizmatlardan foydalanish uchun shartnomani tasdiqlash kerak.")
     await c.answer()
 
+@dp.message(F.text)
+async def on_admin_date_handler(m: Message):
+    if m.from_user.id in WAIT_DATE_FOR:
+        try:
+            raw = (m.text or "").strip().replace("/", "-")
+            if not DATE_RE.match(raw):
+                return await m.answer("❗ Format noto'g'ri. To'g'ri ko'rinish: 2025-10-01")
+            try:
+                start_dt = datetime.strptime(raw, "%Y-%m-%d")
+            except Exception:
+                return await m.answer("❗ Sana tushunilmadi. Misol: 2025-10-01")
+            pid = WAIT_DATE_FOR.pop(m.from_user.id, None)
+            if not pid:
+                return await m.answer("Sessiya topilmadi. Iltimos, Approve (sana tanlash) tugmasidan qayta boshlang.")
+            iso = start_dt.isoformat()
+            await m.answer("✅ Sana qabul qilindi.\nEndi guruh(lar)ga qo'shish usulini tanlang:", reply_markup=multi_select_entry_kb(pid, with_date_iso=iso))
+        except Exception as e:
+            logger.error(f"Error in on_admin_date_handler: {e}")
+            await m.answer("Xatolik yuz berdi")
+        return
+
 @dp.message(F.contact)
 async def on_contact(m: Message):
     if m.from_user.id not in WAIT_CONTACT_FOR:
@@ -590,27 +611,6 @@ async def cb_approve_date(c: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in cb_approve_date: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
-
-@dp.message(F.text)
-async def on_admin_date(m: Message):
-    if m.from_user.id not in WAIT_DATE_FOR:
-        return
-    try:
-        raw = (m.text or "").strip().replace("/", "-")
-        if not DATE_RE.match(raw):
-            return await m.answer("❗ Format noto'g'ri. To'g'ri ko'rinish: 2025-10-01")
-        try:
-            start_dt = datetime.strptime(raw, "%Y-%m-%d")
-        except Exception:
-            return await m.answer("❗ Sana tushunilmadi. Misol: 2025-10-01")
-        pid = WAIT_DATE_FOR.pop(m.from_user.id, None)
-        if not pid:
-            return await m.answer("Sessiya topilmadi. Iltimos, Approve (sana tanlash) tugmasidan qayta boshlang.")
-        iso = start_dt.isoformat()
-        await m.answer("✅ Sana qabul qilindi.\nEndi guruh(lar)ga qo'shish usulini tanlang:", reply_markup=multi_select_entry_kb(pid, with_date_iso=iso))
-    except Exception as e:
-        logger.error(f"Error in on_admin_date: {e}")
-        await m.answer("Xatolik yuz berdi")
 
 @dp.callback_query(F.data.startswith("ap_single:"))
 async def cb_ap_single(c: CallbackQuery):
