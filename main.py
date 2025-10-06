@@ -904,23 +904,62 @@ async def cmd_gstats(m: Message):
     """Batafsil guruh statistikasi: foydalanuvchi, telefon, tugash sanasi."""
     if not is_admin(m.from_user.id):
         return await m.answer("⛔ Bu buyruq faqat adminlar uchun.")
+    
+    if not GROUP_IDS:
+        return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
+    
     try:
         titles = dict(await resolve_group_titles())
-        for gid in GROUP_IDS:
+        total_groups = len(GROUP_IDS)
+        
+        await m.answer(f"📊 *Guruhlar statistikasi*\n\n🏫 Jami guruhlar: {total_groups}\n", parse_mode="Markdown")
+        
+        for idx, gid in enumerate(GROUP_IDS, start=1):
             users = await all_members_of_group(gid)
-            title = titles.get(gid, str(gid))
+            title = titles.get(gid, f"Guruh {gid}")
+            
             if not users:
-                await m.answer(f"🏷 {title} — 0 a'zo")
+                await m.answer(f"🏷 {idx}. *{title}*\nID: `{gid}`\n👥 A'zolar: 0", parse_mode="Markdown")
                 continue
             
-            buf = [f"📚 *{title}* — {len(users)} a'zo\n"]
+            header = f"🏷 {idx}. *{title}*\nID: `{gid}`\n👥 A'zolar: {len(users)}\n{'─' * 30}"
+            buf = [header]
+            
             users_sorted = sorted(users, key=lambda r: (r[3] or 0), reverse=True)
+            
             for i, (uid, username, full_name, exp, phone) in enumerate(users_sorted, start=1):
-                tag = f"@{username}" if username else (full_name or str(uid))
+                name = full_name or f"User{uid}"
+                username_s = f"@{username}" if username else "username yo'q"
                 exp_str, left = human_left(exp) if exp else ("belgilanmagan", 0)
                 phone_s = phone or "-"
-                buf.append(f"{i}. {tag} | 📞 {phone_s} | ⏳ {exp_str} ({left} kun)")
-            await m.answer("\n".join(buf), parse_mode="Markdown")
+                
+                user_line = (
+                    f"{i}. 👤 {name}\n"
+                    f"   • Username: {username_s}\n"
+                    f"   • ID: `{uid}`\n"
+                    f"   • Telefon: {phone_s}\n"
+                    f"   • Obuna: {exp_str} ({left} kun qoldi)"
+                )
+                buf.append(user_line)
+            
+            message = "\n\n".join(buf)
+            
+            if len(message) > 4000:
+                parts = []
+                current_part = header
+                for line in buf[1:]:
+                    if len(current_part) + len(line) + 2 > 4000:
+                        parts.append(current_part)
+                        current_part = line
+                    else:
+                        current_part += "\n\n" + line
+                if current_part:
+                    parts.append(current_part)
+                
+                for part in parts:
+                    await m.answer(part, parse_mode="Markdown")
+            else:
+                await m.answer(message, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error in cmd_gstats: {e}")
         await m.answer(f"Xatolik yuz berdi: {e}")
