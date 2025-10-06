@@ -11,7 +11,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton, FSInputFile
+    ReplyKeyboardMarkup, KeyboardButton, FSInputFile, BufferedInputFile
 )
 from aiogram.filters import Command
 from dotenv import load_dotenv
@@ -512,37 +512,8 @@ async def on_contact(m: Message):
         phone = contact.phone_number
         await update_user_phone(m.from_user.id, phone)
         WAIT_CONTACT_FOR.discard(m.from_user.id)
-        
-        full_name = ""
-        if contact.first_name:
-            full_name = contact.first_name
-            if contact.last_name:
-                full_name += " " + contact.last_name
-        if not full_name:
-            full_name = (m.from_user.first_name or "") + (" " + (m.from_user.last_name or "") if m.from_user.last_name else "")
-            full_name = full_name.strip()
-        if full_name:
-            await update_user_fullname(m.from_user.id, full_name)
-        else:
-            WAIT_FULLNAME_FOR.add(m.from_user.id)
-        
-        txt_buf, pdf_buf = build_contract_files(full_name or str(m.from_user.id), phone)
-        try:
-            await bot.send_document(m.from_user.id, FSInputFile(txt_buf, filename=txt_buf.name))
-            if pdf_buf:
-                await bot.send_document(m.from_user.id, FSInputFile(pdf_buf, filename=pdf_buf.name))
-        except Exception as e:
-            logger.warning(f"Failed to send contract documents to user: {e}")
-        
-        for aid in ADMIN_IDS:
-            try:
-                await bot.send_document(aid, FSInputFile(io.BytesIO(txt_buf.getvalue()), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
-                if pdf_buf:
-                    await bot.send_document(aid, FSInputFile(io.BytesIO(pdf_buf.getvalue()), filename="shartnoma.pdf"))
-            except Exception as e:
-                logger.warning(f"Failed to send contract documents to admin {aid}: {e}")
-        
-        await m.answer("Rahmat! Endi to'lov turini tanlang va chekni yuboring.", reply_markup=start_keyboard())
+        WAIT_FULLNAME_FOR.add(m.from_user.id)
+        await m.answer("✅ Telefon raqam qabul qilindi.\n\n📛 Endi *ism va familiyangizni* yozing (masalan: Hasanov Alisher):", parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error in on_contact: {e}")
         await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
@@ -563,18 +534,18 @@ async def on_fullname_text(m: Message):
             if phone:
                 txt_buf, pdf_buf = build_contract_files(fullname, phone)
                 try:
-                    await bot.send_document(m.from_user.id, FSInputFile(txt_buf, filename=txt_buf.name))
+                    await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
                     if pdf_buf:
-                        await bot.send_document(m.from_user.id, FSInputFile(pdf_buf, filename=pdf_buf.name))
+                        await bot.send_document(m.from_user.id, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
                     logger.info(f"Contract documents sent to user {m.from_user.id}")
                 except Exception as e:
                     logger.error(f"Failed to send contract documents to user: {e}")
                 
                 for aid in ADMIN_IDS:
                     try:
-                        await bot.send_document(aid, FSInputFile(io.BytesIO(txt_buf.getvalue()), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
+                        await bot.send_document(aid, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
                         if pdf_buf:
-                            await bot.send_document(aid, FSInputFile(io.BytesIO(pdf_buf.getvalue()), filename="shartnoma.pdf"))
+                            await bot.send_document(aid, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
                         logger.info(f"Contract documents sent to admin {aid}")
                     except Exception as e:
                         logger.error(f"Failed to send contract documents to admin {aid}: {e}")
