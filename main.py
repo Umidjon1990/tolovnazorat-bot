@@ -485,6 +485,20 @@ async def on_admin_date_handler(m: Message):
             logger.error(f"Error in on_admin_date_handler: {e}")
             await m.answer("Xatolik yuz berdi")
         return
+    
+    if m.from_user.id in WAIT_CONTACT_FOR:
+        phone_pattern = re.compile(r"^\+?\d{9,15}$")
+        if phone_pattern.match((m.text or "").strip()):
+            try:
+                phone = m.text.strip()
+                await update_user_phone(m.from_user.id, phone)
+                WAIT_CONTACT_FOR.discard(m.from_user.id)
+                WAIT_FULLNAME_FOR.add(m.from_user.id)
+                await m.answer("✅ Telefon raqam qabul qilindi.\n\n📛 Endi *ism va familiyangizni* yozing (masalan: Hasanov Alisher):", parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Error processing phone text: {e}")
+                await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+            return
 
 @dp.message(F.contact)
 async def on_contact(m: Message):
@@ -533,9 +547,35 @@ async def on_contact(m: Message):
 @dp.message(F.text.func(lambda t: bool(t) and len(t.strip()) >= 3))
 async def on_fullname_text(m: Message):
     if m.from_user.id in WAIT_FULLNAME_FOR:
-        await update_user_fullname(m.from_user.id, m.text.strip())
-        WAIT_FULLNAME_FOR.discard(m.from_user.id)
-        await m.answer("✅ Ism familiya saqlandi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
+        try:
+            fullname = m.text.strip()
+            await update_user_fullname(m.from_user.id, fullname)
+            WAIT_FULLNAME_FOR.discard(m.from_user.id)
+            
+            user_row = await get_user(m.from_user.id)
+            if user_row:
+                _uid, _gid, _exp, _username, _full, phone, _ag = user_row
+                if phone:
+                    txt_buf, pdf_buf = build_contract_files(fullname, phone)
+                    try:
+                        await bot.send_document(m.from_user.id, FSInputFile(txt_buf, filename=txt_buf.name))
+                        if pdf_buf:
+                            await bot.send_document(m.from_user.id, FSInputFile(pdf_buf, filename=pdf_buf.name))
+                    except Exception as e:
+                        logger.warning(f"Failed to send contract documents to user: {e}")
+                    
+                    for aid in ADMIN_IDS:
+                        try:
+                            await bot.send_document(aid, FSInputFile(io.BytesIO(txt_buf.getvalue()), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
+                            if pdf_buf:
+                                await bot.send_document(aid, FSInputFile(io.BytesIO(pdf_buf.getvalue()), filename="shartnoma.pdf"))
+                        except Exception as e:
+                            logger.warning(f"Failed to send contract documents to admin {aid}: {e}")
+            
+            await m.answer("✅ Ism familiya saqlandi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
+        except Exception as e:
+            logger.error(f"Error in on_fullname_text: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
 
 @dp.callback_query(F.data == "pay_card")
 async def cb_pay_card(c: CallbackQuery):
@@ -867,6 +907,32 @@ async def cmd_stats(m: Message):
             lines.append(f"... va yana {len(users_sorted)-MAX_SHOW} ta")
         
         await m.answer("\n".join(lines))
+
+@dp.message(Command("gstats"))
+async def cmd_gstats(m: Message):
+    """Batafsil guruh statistikasi: foydalanuvchi, telefon, tugash sanasi."""
+    if not is_admin(m.from_user.id):
+        return await m.answer("⛔ Bu buyruq faqat adminlar uchun.")
+    try:
+        titles = dict(await resolve_group_titles())
+        for gid in GROUP_IDS:
+            users = await all_members_of_group(gid)
+            title = titles.get(gid, str(gid))
+            if not users:
+                await m.answer(f"🏷 {title} — 0 a'zo")
+                continue
+            
+            buf = [f"📚 *{title}* — {len(users)} a'zo\n"]
+            users_sorted = sorted(users, key=lambda r: (r[3] or 0), reverse=True)
+            for i, (uid, username, full_name, exp, phone) in enumerate(users_sorted, start=1):
+                tag = f"@{username}" if username else (full_name or str(uid))
+                exp_str, left = human_left(exp) if exp else ("belgilanmagan", 0)
+                phone_s = phone or "-"
+                buf.append(f"{i}. {tag} | 📞 {phone_s} | ⏳ {exp_str} ({left} kun)")
+            await m.answer("\n".join(buf), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error in cmd_gstats: {e}")
+        await m.answer(f"Xatolik yuz berdi: {e}")
 
 _WARNED_CACHE: dict[tuple[int, int, str], int] = {}
 
