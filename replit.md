@@ -2,13 +2,16 @@
 
 This is a Telegram bot application built using the aiogram framework (Python). The bot manages user interactions, admin functionality, and private group access through invite links for an online course subscription system. The application uses SQLite (via aiosqlite) for data persistence and is configured through environment variables for deployment flexibility.
 
-# Recent Changes (October 2025)
+# Recent Changes (October 6, 2025)
 
-- Improved code structure with better organization and error handling
-- Enhanced logging throughout the application with detailed timestamps
-- Fixed handler ordering issue for admin date input functionality
-- Added comprehensive try-catch blocks to prevent crashes
-- Created proper .gitignore and .env.example files for better project management
+- Fixed critical handler ordering issue - moved Command handlers before F.text handler to ensure commands are processed correctly
+- Removed fullname input step - phone number input now directly generates PDF contracts with auto-filled user info from Telegram
+- Fixed PDF contract generation - switched from FSInputFile to BufferedInputFile for proper document sending
+- Enhanced statistics commands with detailed group member information
+- Added `/myid` command for users to check their Telegram ID
+- Improved `/gstats` command to show comprehensive details: username, ID, phone, subscription dates for each member
+- Fixed invite link generation to be truly one-time use with `member_limit=1`
+- Streamlined user registration flow for better UX
 
 # User Preferences
 
@@ -54,12 +57,15 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 
 ## Message Handling
 - **Pattern**: Handler-based routing using decorators
-- **Handler Priority**: Critical order for proper functionality:
-  1. Admin date input handler (for custom subscription start dates)
-  2. Contact handler (for phone number collection)
-  3. Fullname text handler (for user name collection)
+- **Handler Priority**: **CRITICAL** - Commands must come before F.text handler:
+  1. Command handlers (`/start`, `/stats`, `/gstats`, `/groups`, `/myid`)
+  2. Admin date input handler (for custom subscription start dates)
+  3. Contact handler (for phone number collection via Contact button)
+  4. Phone text handler (for phone number as text input)
+  5. General F.text handler (catches all remaining text messages)
 - **Message Types**: Support for text messages, callbacks, file attachments (payment receipts), and contact sharing
 - **Keyboards**: Both inline and reply keyboard markup for user interaction
+- **Note**: Handler order is crucial - incorrect ordering causes commands to be ignored
 
 ## Error Handling & Logging
 - **Logging**: Structured logging with timestamps, severity levels, and context information
@@ -72,18 +78,19 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 ### User Flow
 1. `/start` command displays contract
 2. User accepts contract terms
-3. User shares phone number
-4. User provides full name (if not available from contact)
-5. Contract documents (TXT and PDF) generated and sent
-6. User selects payment method and uploads receipt photo
-7. Admin approves payment and assigns group(s)
-8. User receives invite link(s) with expiration
+3. User shares phone number (Contact button or TEXT)
+4. Contract documents (TXT and PDF) automatically generated and sent (name auto-filled from Telegram profile)
+5. User selects payment method and uploads receipt photo
+6. Admin approves payment and assigns group(s)
+7. User receives one-time invite link(s) with expiration
 
-### Admin Features
-- `/stats` - Detailed statistics for all groups and users
-- `/groups` - List of configured groups
+### Admin Commands
+- `/myid` - Shows user's Telegram ID
+- `/groups` - List of configured groups with names and IDs
+- `/stats` - Quick statistics: total users, active subscriptions, expired, and summary per group
+- `/gstats` - **Detailed statistics**: Full member list for each group showing username, ID, phone number, and subscription expiry dates
 - Payment approval with immediate or custom start date
-- Single or multi-group assignment
+- Single or multi-group assignment per user
 - Subscription renewal and management
 - Automatic expiry warnings with action buttons
 
