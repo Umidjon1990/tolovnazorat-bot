@@ -90,9 +90,11 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 ### Admin Commands
 - `/myid` - Shows user's Telegram ID
 - `/groups` - List of configured groups with names and IDs
+- `/addgroup <GROUP_ID>` - **NEW**: Add a new group at runtime without republishing
+- `/removegroup <GROUP_ID>` - **NEW**: Remove a group at runtime without republishing
 - `/stats` - Quick statistics: total users, active subscriptions, expired, and summary per group
 - `/gstats` - **Detailed statistics**: Full member list for each group showing username, ID, phone number, and subscription expiry dates
-- `/expiring` - **NEW**: Shows users whose subscriptions are expiring soon (next N days based on REMIND_DAYS)
+- `/expiring` - Shows users whose subscriptions are expiring soon (next N days based on REMIND_DAYS)
 - Payment approval with immediate or custom start date
 - Single or multi-group assignment per user
 - Subscription renewal and management
