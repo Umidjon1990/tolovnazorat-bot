@@ -68,61 +68,77 @@ WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 
-CONTRACT_TEXT = """ONLAYN O'QUV SHARTNOMA
+CONTRACT_TEXT = """📄 ONLAYN O'QUV SHARTNOMA
 
 O'rtasida:
-"Zamonaviy Ta'lim" MCHJ (bundan keyin "Markaz" deb yuritiladi)
+"Zamonaviy Ta'lim" MCHJ (bundan keyin — Markaz)
 va
-O'quvchi (bundan keyin "O'quvchi" deb yuritiladi)
+O'quvchi (bundan keyin — O'quvchi) o'rtasida.
 
-1. SHARTNOMA MAQSADI
-Ushbu shartnoma Markaz tomonidan tashkil etilgan "CEFR Imtihoniga Bosqichma-bosqich Tayyorlovchi Video Kurs" dasturi doirasida o'quvchining mas'uliyatini, to'lov tartibini va Markaz kafolatlarini belgilashga qaratilgan.
+1. SHARTNOMANING MAQSADI
+
+Ushbu shartnoma "CEFR Imtihoniga Bosqichma-bosqich Tayyorlovchi Video Kurs" dasturida ishtirok etuvchi o'quvchi va Markaz o'rtasidagi o'quv, to'lov va javobgarlik tartibini belgilaydi.
 
 2. KURS TASHKILOTI
+
 Darslar yopiq Telegram guruhlari orqali olib boriladi.
-Har bosqich uchun alohida A1, A2, B1, B2 manbalar guruhi va vazifa guruhi mavjud.
-Darslar kun ora video shaklida joylanadi, va har hafta jonli onlayn dars o'tkaziladi.
+
+Har bosqich (A1, A2, B1, B2) uchun alohida manbalar va vazifalar guruhi mavjud.
+
+Darslar kun ora video shaklida joylanadi, har hafta jonli onlayn sessiya o'tkaziladi.
+
 Har bir bosqich o'rtacha 2 oy davom etadi.
-Darslar Bosqichli Arab Tili, Miftah, va CEFR standartlariga asoslangan materiallar asosida tashkil qilinadi.
+
+Darslar "Bosqichli Arab Tili", "Miftah" va CEFR standartlariga asoslanadi.
 
 3. O'QUVCHINING MAJBURIYATLARI
-O'quvchi darslarni muntazam kuzatib borishi va faol ishtirok etishi shart.
-O'quvchi 1 hafta davomida hech qanday vazifa yubormasa, sababsiz holda guruhdan chetlatiladi.
-O'quvchi bosqichni muvaffaqiyatli yakunlamasa, keyingi bosqichga imtihon asosida o'ta oladi yoki shu bosqichni qayta o'qiydi.
-O'quvchi kurs davomida barcha ichki tartib-qoidalarga rioya qilishi shart.
-O'quvchi to'lovni belgilangan muddatda amalga oshirishi kerak.
+
+3.1. O'quvchi darslarni muntazam kuzatib borishi va faol ishtirok etishi shart.
+3.2. 1 hafta davomida topshiriq yubormagan o'quvchi sababsiz holda guruhdan chiqariladi.
+3.3. Bosqichni yakunlay olmagan o'quvchi imtihon asosida qayta o'qishi mumkin.
+3.4. Kurs ichki tartib-qoidalariga rioya etilishi majburiy.
+3.5. To'lov belgilangan muddatda amalga oshiriladi.
 
 4. MARKAZNING MAJBURIYATLARI
-Markaz har bir bosqich uchun sifatli video darslar va materiallar bilan ta'minlaydi.
-Markaz o'quvchining natijasi uchun kafolat beradi, agar o'quvchi topshiriqlarni to'liq bajargan bo'lsa.
-Markaz haftasiga kamida bitta jonli sessiya o'tkazadi.
-Markaz o'quvchi murojaatlariga o'z vaqtida javob beradi.
+
+4.1. Har bir bosqich uchun sifatli video darslar va materiallar taqdim etadi.
+4.2. O'quvchi topshiriqlarni to'liq bajargan taqdirda natija kafolatlanadi.
+4.3. Har hafta kamida 1 jonli sessiya o'tkaziladi.
+4.4. O'quvchilarning murojaatlariga o'z vaqtida javob beriladi.
 
 5. TO'LOV TARTIBI VA QAYTARISH SHARTLARI
-Kursning oylik to'lovi taxminan 300 000 so'm miqdorida belgilanadi.
-To'lov kurs uchun oldindan amalga oshiriladi.
-O'quvchi kurs sifatidan norozi bo'lsa, 30% xizmat haqi ushlab qolingan holda to'lov qaytarilishi mumkin.
-Boshqa hollarda to'lov qaytarilmaydi.
-Qaytariladigan to'lov (agar mavjud bo'lsa) 1 oy ichida amalga oshiriladi.
-O'quvchi kursni 50% yoki undan ko'prog'ini o'tgan bo'lsa, to'lov qaytarilmaydi.
 
-6. KAFOLATLAR VA MA'SULIYAT
-Markaz o'quvchi kursni to'liq o'tagan va topshiriqlarni bajargan taqdirda darajasining oshishini kafolatlaydi.
-O'quvchi tomonidan intizom buzilishi, topshiriqlarning muntazam yuborilmasligi yoki muloqotdagi qo'pol xatti-harakatlar uchun Markaz chetlatish huquqiga ega.
-Shartnomadagi barcha shartlarni buzgan tomon ma'suliyatni o'z zimmasiga oladi.
+5.1. Kursning oylik to'lovi — 300 000 so'm.
+5.2. To'lov oldindan amalga oshiriladi.
+5.3. O'quvchi kurs sifatidan norozi bo'lsa, 30% xizmat haqi ushlab qolingan holda qaytarish mumkin.
+5.4. Qolgan hollarda to'lov qaytarilmaydi.
+5.5. Agar o'quvchi kursning 50% yoki undan ko'prog'ini o'tgan bo'lsa, to'lov qaytarilmaydi.
+
+6. KAFOLATLAR VA JAVOBGARLIK
+
+6.1. Markaz o'quvchi kursni to'liq bajarganda darajasi oshishini kafolatlaydi.
+6.2. Intizom buzilishi, topshiriqlar yuborilmasligi yoki muloqotdagi qo'pol xatti-harakatlar uchun Markaz o'quvchini chetlatish huquqiga ega.
+6.3. Har ikki tomon o'z majburiyatini bajarmasa, javobgarlikni o'zi zimmasiga oladi.
 
 7. SHARTNOMA MUDDATI
-Ushbu shartnoma o'quvchi kursga ro'yxatdan o'tgan paytdan boshlab kuchga kiradi.
-Kurs yakunlangandan so'ng avtomatik ravishda o'z kuchini yo'qotadi.
+
+7.1. Shartnoma o'quvchi kursga ro'yxatdan o'tgan kundan kuchga kiradi.
+7.2. Kurs yakunlangach, shartnoma avtomatik tarzda o'z kuchini yo'qotadi.
 
 8. MAXSUS QOIDALAR
-DIQQAT: Kurs uchun qabul hali ochilmagan.
-Hozirda barcha video darslar va manbalar sifatli shaklda tayyorlanmoqda.
-Ro'yxatdan o'tgan o'quvchilar uchun kurs ochilishi haqida oldindan xabar beriladi.
-Har bir bosqich yakunida imtihon o'tkazilib, natijalarga ko'ra keyingi bosqichga o'tiladi.
+
+8.1. Har bir bosqich yakunida imtihon o'tkaziladi.
+8.2. Yetarli ball to'play olmagan o'quvchi:
+
+Guruhdagi o'qishni to'xtatadi;
+
+Qayta o'qish uchun yangi to'lov qiladi yoki
+
+Mustaqil tayyorlanib, 1 haftadan so'ng qayta imtihon topshiradi.
 
 9. TOMONLARNING ROZILIGI
-Quyidagi "Tasdiqlayman" tugmasini bosish orqali O'quvchi shartlar bilan tanishganini va rozi ekanini bildiradi.
+
+O'quvchi quyidagi "Tasdiqlayman" tugmasini bosish orqali shartlar bilan tanishganini va rozi ekanini bildiradi.
 """
 
 CREATE_SQL = """
