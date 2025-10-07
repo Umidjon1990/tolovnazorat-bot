@@ -2,8 +2,10 @@
 
 This is a Telegram bot application built using the aiogram framework (Python). The bot manages user interactions, admin functionality, and private group access through invite links for an online course subscription system. The application uses SQLite (via aiosqlite) for data persistence and is configured through environment variables for deployment flexibility.
 
-# Recent Changes (October 6, 2025)
+# Recent Changes (October 7, 2025)
 
+- **MAJOR: Migrated from SQLite to PostgreSQL** - Database now persists across republishing, production-ready
+- **Added `/addgroup` and `/removegroup` commands** - Dynamically manage groups without republishing
 - Fixed critical handler ordering issue - moved Command handlers before F.text handler to ensure commands are processed correctly
 - Removed fullname input step - phone number input now directly generates PDF contracts with auto-filled user info from Telegram
 - Fixed PDF contract generation - switched from FSInputFile to BufferedInputFile for proper document sending
@@ -12,9 +14,8 @@ This is a Telegram bot application built using the aiogram framework (Python). T
 - Improved `/gstats` command to show comprehensive details: username, ID, phone, subscription dates for each member
 - Fixed invite link generation to be truly one-time use with `member_limit=1`
 - Streamlined user registration flow for better UX
-- **Added auto-kick after 3 "not paid" warnings** - Admin can mark user as "not paid" 3 times, then user is automatically kicked
-- **Added `/expiring` command** - Shows list of users whose subscriptions are expiring soon (configurable days)
-- **Created Replit PostgreSQL database** - Available for future migration from SQLite for persistent storage
+- Added auto-kick after 3 "not paid" warnings - Admin can mark user as "not paid" 3 times, then user is automatically kicked
+- Added `/expiring` command - Shows list of users whose subscriptions are expiring soon (configurable days)
 
 # User Preferences
 
@@ -32,13 +33,14 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - State management for multi-step workflows (date input, contact collection, fullname entry)
 
 ## Data Storage
-- **Database**: SQLite with aiosqlite (async wrapper)
-- **Rationale**: Lightweight, serverless database suitable for small to medium-scale bot applications with minimal infrastructure requirements
-- **Design**: Fully asynchronous database operations to prevent blocking the event loop
+- **Database**: PostgreSQL with asyncpg (async driver)
+- **Rationale**: Professional, persistent database with Replit hosting - data persists across republishing
+- **Design**: Connection pooling (min_size=1, max_size=10) for optimal performance and fully asynchronous operations
 - **Tables**:
   - `users`: Core user information with subscription details
   - `payments`: Payment records with approval status
   - `user_groups`: Many-to-many relationship for multi-group access
+- **Migration**: Successfully migrated from SQLite to PostgreSQL (October 7, 2025)
 
 ## Configuration Management
 - **Approach**: Environment variables loaded via python-dotenv
@@ -122,7 +124,8 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Standard library**: asyncio, logging, datetime, typing, io, re for core functionality
 
 ## Database
-- **SQLite**: Local file-based relational database
-- **Access Pattern**: Single-connection async operations with proper indexing
+- **PostgreSQL**: Replit-hosted persistent database
+- **Access Pattern**: Connection pooling with asyncpg for optimal async performance
 - **Schema**: Supports user management, payment tracking, and multi-group memberships
-- **Note**: Suitable for current scale; may migrate to PostgreSQL for larger deployments
+- **Persistence**: Data survives across republishing and restarts - fully production-ready
+- **Note**: Successfully migrated from SQLite to PostgreSQL for enterprise-grade reliability
