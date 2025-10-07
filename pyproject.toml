@@ -5,7 +5,7 @@ description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
     "aiogram>=3.22.0",
-    "aiosqlite>=0.21.0",
+    "asyncpg>=0.30.0",
     "python-dotenv>=1.1.1",
     "reportlab>=4.4.4",
 ]
