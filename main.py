@@ -407,11 +407,30 @@ def build_contract_files(user_fullname: str, user_phone: Optional[str]):
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
+        import os
         pdf_buf = io.BytesIO()
         pdf_buf.name = "shartnoma.pdf"
         c = canvas.Canvas(pdf_buf, pagesize=A4)
         width, height = A4
-        y = height - 40
+        
+        # Logo qo'shish (agar logo.png fayli mavjud bo'lsa)
+        logo_path = "logo.png"
+        if os.path.exists(logo_path):
+            try:
+                # Logotipni yuqori o'rtada joylashtirish (100x100 piksel)
+                logo_width = 100
+                logo_height = 100
+                x_centered = (width - logo_width) / 2
+                y_top = height - logo_height - 20
+                c.drawImage(logo_path, x_centered, y_top, width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+                # Logo ostidan matn boshlash
+                y = y_top - 30
+            except Exception as logo_err:
+                logger.warning(f"Logo qo'shishda xatolik: {logo_err}")
+                y = height - 40
+        else:
+            y = height - 40
+        
         for line in stamped.splitlines():
             c.drawString(40, y, line[:110])
             y -= 14
