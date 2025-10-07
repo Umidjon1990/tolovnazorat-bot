@@ -30,6 +30,6 @@ args = "python main.py"
 outputType = "console"
 
 [deployment]
-deploymentTarget = "gce"
+deploymentTarget = "vm"
 run = ["python", "main.py"]
 ignorePorts = true
