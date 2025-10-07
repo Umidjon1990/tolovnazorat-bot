@@ -399,15 +399,21 @@ def human_left(expires_at: int) -> tuple[str, int]:
     days_left = (dt_loc.date() - (datetime.utcnow() + TZ_OFFSET).date()).days
     return dt_loc.strftime("%Y-%m-%d"), days_left
 
-def build_contract_files(user_fullname: str, user_phone: Optional[str]):
-    stamped = f"{CONTRACT_TEXT}\n\n---\nO'quvchi: {user_fullname}\nTelefon: {user_phone or '-'}\nSana: {(datetime.utcnow()+TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n"
+def build_contract_files(user_fullname: str, user_phone: Optional[str], user_id: int = 0):
+    # Shartnoma raqami: user_id + timestamp
+    contract_num = f"ZT-{user_id}-{int(datetime.utcnow().timestamp())}"
+    
+    stamped = f"{CONTRACT_TEXT}\n\n---\nO'quvchi: {user_fullname}\nTelefon: {user_phone or '-'}\nShartnoma raqami: {contract_num}\nSana: {(datetime.utcnow()+TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n"
     txt_buf = io.BytesIO(stamped.encode("utf-8"))
     txt_buf.name = "shartnoma.txt"
     pdf_buf = None
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
+        from reportlab.lib.utils import ImageReader
+        import qrcode
         import os
+        
         pdf_buf = io.BytesIO()
         pdf_buf.name = "shartnoma.pdf"
         c = canvas.Canvas(pdf_buf, pagesize=A4)
@@ -431,12 +437,56 @@ def build_contract_files(user_fullname: str, user_phone: Optional[str]):
         else:
             y = height - 40
         
+        # Shartnoma matni
         for line in stamped.splitlines():
             c.drawString(40, y, line[:110])
             y -= 14
             if y < 40:
                 c.showPage()
                 y = height - 40
+        
+        # Markaz ma'lumotlari (pastda)
+        y -= 20  # Bo'sh joy
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(40, y, "Markaz ma'lumotlari:")
+        y -= 15
+        c.setFont("Helvetica", 9)
+        c.drawString(40, y, "Markaz nomi: Zamonaviy Ta'lim")
+        y -= 12
+        c.drawString(40, y, f"Guvohnoma raqami: 2895972")
+        y -= 12
+        c.drawString(40, y, f"Tasdiqnoma raqami: 929919")
+        y -= 12
+        c.drawString(40, y, f"Website: www.zamomaytalim.uz")
+        y -= 12
+        c.drawString(40, y, f"Aloqa: @zamonaviytalimuz")
+        y -= 12
+        c.drawString(40, y, f"Shartnoma raqami: {contract_num}")
+        
+        # QR kod yaratish va joylashtirish (o'ng pastda)
+        try:
+            qr = qrcode.QRCode(version=1, box_size=3, border=1)
+            qr.add_data("https://t.me/zamonaviymedia")
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
+            
+            # QR kodni BytesIO'ga saqlash
+            qr_buffer = io.BytesIO()
+            qr_img.save(qr_buffer, format='PNG')
+            qr_buffer.seek(0)
+            
+            # QR kodni o'ng pastga joylashtirish
+            qr_size = 80
+            qr_x = width - qr_size - 40
+            qr_y = 40
+            c.drawImage(ImageReader(qr_buffer), qr_x, qr_y, width=qr_size, height=qr_size)
+            
+            # QR kod ostida matn
+            c.setFont("Helvetica", 7)
+            c.drawString(qr_x, qr_y - 10, "Telegram kanal")
+        except Exception as qr_err:
+            logger.warning(f"QR kod qo'shishda xatolik: {qr_err}")
+        
         c.save()
         pdf_buf.seek(0)
     except Exception as e:
@@ -747,7 +797,7 @@ async def on_admin_date_handler(m: Message):
                 full_name = full_name.strip() or f"User{m.from_user.id}"
                 await update_user_fullname(m.from_user.id, full_name)
                 
-                txt_buf, pdf_buf = build_contract_files(full_name, phone)
+                txt_buf, pdf_buf = build_contract_files(full_name, phone, m.from_user.id)
                 try:
                     await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
                     if pdf_buf:
@@ -793,7 +843,7 @@ async def on_contact(m: Message):
             full_name = f"User{m.from_user.id}"
         await update_user_fullname(m.from_user.id, full_name)
         
-        txt_buf, pdf_buf = build_contract_files(full_name, phone)
+        txt_buf, pdf_buf = build_contract_files(full_name, phone, m.from_user.id)
         try:
             await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
             if pdf_buf:
