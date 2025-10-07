@@ -49,7 +49,7 @@ if not GROUP_IDS:
     logger.warning("PRIVATE_GROUP_ID is empty. Invite links cannot be created.")
 
 SUBSCRIPTION_DAYS = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
-INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "1"))
+INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "24"))
 REMIND_DAYS = int(os.getenv("REMIND_DAYS", "3"))
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -975,7 +975,7 @@ async def cb_ms_confirm(c: CallbackQuery):
             await bot.send_message(
                 user_id,
                 "✅ To'lov tasdiqlandi!\n"
-                f"Quyidagi guruhlarga kirish havolalari (har biri 1 martalik, {INVITE_LINK_EXPIRE_HOURS} soat ichida):\n"
+                f"Quyidagi guruhlarga kirish havolalari (har biri 1 martalik, 1 kun ichida):\n"
                 + "\n".join(links_out) +
                 f"\n\n⏳ Obuna tugash sanasi: {human_exp}"
             )
@@ -1025,7 +1025,7 @@ async def cb_pick_group(c: CallbackQuery):
             await bot.send_message(
                 user_id,
                 "✅ To'lov tasdiqlandi!\n"
-                f"Guruhga kirish havolasi (1 martalik, {INVITE_LINK_EXPIRE_HOURS} soat ichida):\n{link}\n\n"
+                f"Guruhga kirish havolasi (1 martalik, 1 kun ichida):\n{link}\n\n"
                 f"⏳ Obuna tugash sanasi: {human_exp}"
             )
         except Exception as e:
