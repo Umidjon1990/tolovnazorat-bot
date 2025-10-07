@@ -515,6 +515,72 @@ async def cmd_expiring(m: Message):
         logger.error(f"Error in cmd_expiring: {e}")
         await m.answer("Xatolik yuz berdi.")
 
+@dp.message(Command("addgroup"))
+async def cmd_addgroup(m: Message):
+    """Yangi guruh qo'shish: /addgroup <GROUP_ID>"""
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = m.text.split()
+        if len(parts) != 2:
+            return await m.answer("❌ Noto'g'ri format!\n\nTo'g'ri: /addgroup <GROUP_ID>\nMasalan: /addgroup -1002345678")
+        
+        group_id = parts[1].strip()
+        if not group_id.lstrip("-").isdigit():
+            return await m.answer("❌ GROUP_ID raqam bo'lishi kerak!\nMasalan: /addgroup -1002345678")
+        
+        gid = int(group_id)
+        
+        if gid in GROUP_IDS:
+            return await m.answer(f"⚠️ Bu guruh allaqachon qo'shilgan: {gid}")
+        
+        try:
+            chat = await bot.get_chat(gid)
+            title = chat.title or str(gid)
+        except Exception as e:
+            return await m.answer(f"❌ Guruh topilmadi yoki bot guruhda emas!\nXato: {e}\n\nBot'ni avval guruhga admin qilib qo'shing.")
+        
+        GROUP_IDS.append(gid)
+        await m.answer(f"✅ Yangi guruh qo'shildi!\n\n• Guruh: {title}\n• ID: `{gid}`\n\n📝 Eslatma: Bot qayta ishga tushganda, bu guruhni PRIVATE_GROUP_ID ga qo'shishni unutmang!", parse_mode="Markdown")
+    
+    except Exception as e:
+        logger.error(f"Error in cmd_addgroup: {e}")
+        await m.answer(f"Xatolik yuz berdi: {e}")
+
+@dp.message(Command("removegroup"))
+async def cmd_removegroup(m: Message):
+    """Guruhni o'chirish: /removegroup <GROUP_ID>"""
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = m.text.split()
+        if len(parts) != 2:
+            return await m.answer("❌ Noto'g'ri format!\n\nTo'g'ri: /removegroup <GROUP_ID>\nMasalan: /removegroup -1002345678")
+        
+        group_id = parts[1].strip()
+        if not group_id.lstrip("-").isdigit():
+            return await m.answer("❌ GROUP_ID raqam bo'lishi kerak!\nMasalan: /removegroup -1002345678")
+        
+        gid = int(group_id)
+        
+        if gid not in GROUP_IDS:
+            return await m.answer(f"⚠️ Bu guruh ro'yxatda yo'q: {gid}")
+        
+        try:
+            chat = await bot.get_chat(gid)
+            title = chat.title or str(gid)
+        except Exception:
+            title = str(gid)
+        
+        GROUP_IDS.remove(gid)
+        await m.answer(f"❌ Guruh o'chirildi!\n\n• Guruh: {title}\n• ID: `{gid}`\n\n📝 Eslatma: Bot qayta ishga tushganda, PRIVATE_GROUP_ID dan ham o'chiring!", parse_mode="Markdown")
+    
+    except Exception as e:
+        logger.error(f"Error in cmd_removegroup: {e}")
+        await m.answer(f"Xatolik yuz berdi: {e}")
+
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
     if not is_admin(m.from_user.id):
