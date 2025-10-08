@@ -869,23 +869,45 @@ async def on_contact(m: Message):
 
 @dp.callback_query(F.data == "pay_card")
 async def cb_pay_card(c: CallbackQuery):
+    # To'lov ma'lumotlari
     await c.message.answer(
-        "💳 Karta raqami:\n9860160130847827 H.Halikova\n\n"
-        "To'lovdan so'ng chekni shu chatga yuboring.\n\n"
-        "📹 To'lov qilish uchun yo'riqnoma:\n"
-        "https://youtu.be/Ymj42lZ16zw"
+        "💳 *Karta orqali to'lov*\n\n"
+        "Karta raqami: `9860160130847827`\n"
+        "Egasi: H.Halikova\n\n"
+        "To'lovdan so'ng chekni shu chatga yuboring.",
+        parse_mode="Markdown"
+    )
+    # Yo'riqnoma alohida xabar
+    await c.message.answer(
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📹 *To'lov qilish bo'yicha video yo'riqnoma:*\n\n"
+        "👇 Quyidagi linkni bosing:\n"
+        "🔗 https://youtu.be/Ymj42lZ16zw\n"
+        "━━━━━━━━━━━━━━━━━━━━",
+        parse_mode="Markdown"
     )
     await c.answer()
 
 @dp.callback_query(F.data == "pay_link")
 async def cb_pay_link(c: CallbackQuery):
+    # To'lov havolalari
     await c.message.answer(
-        "🔗 To'lov havolasi\n\n"
-        "PAYME ORQALI:\nhttps://payme.uz/fallback/merchant/?id=68aebaff42ec20bb02a46c8c\n\n"
-        "CLICK ORQALI:\nhttps://indoor.click.uz/pay?id=081968&t=0\n\n"
-        "To'lovdan so'ng chekni shu chatga yuboring.\n\n"
-        "📹 To'lov qilish uchun yo'riqnoma:\n"
-        "https://youtu.be/Ymj42lZ16zw"
+        "🔗 *Havola orqali to'lov*\n\n"
+        "💚 *PAYME:*\n"
+        "https://payme.uz/fallback/merchant/?id=68aebaff42ec20bb02a46c8c\n\n"
+        "💙 *CLICK:*\n"
+        "https://indoor.click.uz/pay?id=081968&t=0\n\n"
+        "To'lovdan so'ng chekni shu chatga yuboring.",
+        parse_mode="Markdown"
+    )
+    # Yo'riqnoma alohida xabar
+    await c.message.answer(
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📹 *To'lov qilish bo'yicha video yo'riqnoma:*\n\n"
+        "👇 Quyidagi linkni bosing:\n"
+        "🔗 https://youtu.be/Ymj42lZ16zw\n"
+        "━━━━━━━━━━━━━━━━━━━━",
+        parse_mode="Markdown"
     )
     await c.answer()
 
