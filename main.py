@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-import asyncpg
+import aiosqlite
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery,
@@ -49,15 +49,11 @@ if not GROUP_IDS:
     logger.warning("PRIVATE_GROUP_ID is empty. Invite links cannot be created.")
 
 SUBSCRIPTION_DAYS = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
-INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "24"))
+INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "1"))
 REMIND_DAYS = int(os.getenv("REMIND_DAYS", "3"))
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable not found. PostgreSQL database required.")
-
+DB_PATH = os.getenv("DB_PATH", "./subs.db")
 TZ_OFFSET = timedelta(hours=5)
-db_pool: Optional[asyncpg.Pool] = None
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -68,101 +64,85 @@ WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 
-CONTRACT_TEXT = """📄 ONLAYN O'QUV SHARTNOMA
+CONTRACT_TEXT = """ONLAYN O'QUV SHARTNOMA
 
 O'rtasida:
-"Zamonaviy Ta'lim" MCHJ (bundan keyin — Markaz)
+"Zamonaviy Ta'lim" MCHJ (bundan keyin "Markaz" deb yuritiladi)
 va
-O'quvchi (bundan keyin — O'quvchi) o'rtasida.
+O'quvchi (bundan keyin "O'quvchi" deb yuritiladi)
 
-1. SHARTNOMANING MAQSADI
-
-Ushbu shartnoma "CEFR Imtihoniga Bosqichma-bosqich Tayyorlovchi Video Kurs" dasturida ishtirok etuvchi o'quvchi va Markaz o'rtasidagi o'quv, to'lov va javobgarlik tartibini belgilaydi.
+1. SHARTNOMA MAQSADI
+Ushbu shartnoma Markaz tomonidan tashkil etilgan "CEFR Imtihoniga Bosqichma-bosqich Tayyorlovchi Video Kurs" dasturi doirasida o'quvchining mas'uliyatini, to'lov tartibini va Markaz kafolatlarini belgilashga qaratilgan.
 
 2. KURS TASHKILOTI
-
 Darslar yopiq Telegram guruhlari orqali olib boriladi.
-
-Har bosqich (A1, A2, B1, B2) uchun alohida manbalar va vazifalar guruhi mavjud.
-
-Darslar kun ora video shaklida joylanadi, har hafta jonli onlayn sessiya o'tkaziladi.
-
+Har bosqich uchun alohida A1, A2, B1, B2 manbalar guruhi va vazifa guruhi mavjud.
+Darslar kun ora video shaklida joylanadi, va har hafta jonli onlayn dars o'tkaziladi.
 Har bir bosqich o'rtacha 2 oy davom etadi.
-
-Darslar "Bosqichli Arab Tili", "Miftah" va CEFR standartlariga asoslanadi.
+Darslar Bosqichli Arab Tili, Miftah, va CEFR standartlariga asoslangan materiallar asosida tashkil qilinadi.
 
 3. O'QUVCHINING MAJBURIYATLARI
-
-3.1. O'quvchi darslarni muntazam kuzatib borishi va faol ishtirok etishi shart.
-3.2. 1 hafta davomida topshiriq yubormagan o'quvchi sababsiz holda guruhdan chiqariladi.
-3.3. Bosqichni yakunlay olmagan o'quvchi imtihon asosida qayta o'qishi mumkin.
-3.4. Kurs ichki tartib-qoidalariga rioya etilishi majburiy.
-3.5. To'lov belgilangan muddatda amalga oshiriladi.
+O'quvchi darslarni muntazam kuzatib borishi va faol ishtirok etishi shart.
+O'quvchi 1 hafta davomida hech qanday vazifa yubormasa, sababsiz holda guruhdan chetlatiladi.
+O'quvchi bosqichni muvaffaqiyatli yakunlamasa, keyingi bosqichga imtihon asosida o'ta oladi yoki shu bosqichni qayta o'qiydi.
+O'quvchi kurs davomida barcha ichki tartib-qoidalarga rioya qilishi shart.
+O'quvchi to'lovni belgilangan muddatda amalga oshirishi kerak.
 
 4. MARKAZNING MAJBURIYATLARI
-
-4.1. Har bir bosqich uchun sifatli video darslar va materiallar taqdim etadi.
-4.2. O'quvchi topshiriqlarni to'liq bajargan taqdirda natija kafolatlanadi.
-4.3. Har hafta kamida 1 jonli sessiya o'tkaziladi.
-4.4. O'quvchilarning murojaatlariga o'z vaqtida javob beriladi.
+Markaz har bir bosqich uchun sifatli video darslar va materiallar bilan ta'minlaydi.
+Markaz o'quvchining natijasi uchun kafolat beradi, agar o'quvchi topshiriqlarni to'liq bajargan bo'lsa.
+Markaz haftasiga kamida bitta jonli sessiya o'tkazadi.
+Markaz o'quvchi murojaatlariga o'z vaqtida javob beradi.
 
 5. TO'LOV TARTIBI VA QAYTARISH SHARTLARI
+Kursning oylik to'lovi taxminan 300 000 so'm miqdorida belgilanadi.
+To'lov kurs uchun oldindan amalga oshiriladi.
+O'quvchi kurs sifatidan norozi bo'lsa, 30% xizmat haqi ushlab qolingan holda to'lov qaytarilishi mumkin.
+Boshqa hollarda to'lov qaytarilmaydi.
+Qaytariladigan to'lov (agar mavjud bo'lsa) 1 oy ichida amalga oshiriladi.
+O'quvchi kursni 50% yoki undan ko'prog'ini o'tgan bo'lsa, to'lov qaytarilmaydi.
 
-5.1. Kursning oylik to'lovi — 300 000 so'm.
-5.2. To'lov oldindan amalga oshiriladi.
-5.3. O'quvchi kurs sifatidan norozi bo'lsa, 30% xizmat haqi ushlab qolingan holda qaytarish mumkin.
-5.4. Qolgan hollarda to'lov qaytarilmaydi.
-5.5. Agar o'quvchi kursning 50% yoki undan ko'prog'ini o'tgan bo'lsa, to'lov qaytarilmaydi.
-
-6. KAFOLATLAR VA JAVOBGARLIK
-
-6.1. Markaz o'quvchi kursni to'liq bajarganda darajasi oshishini kafolatlaydi.
-6.2. Intizom buzilishi, topshiriqlar yuborilmasligi yoki muloqotdagi qo'pol xatti-harakatlar uchun Markaz o'quvchini chetlatish huquqiga ega.
-6.3. Har ikki tomon o'z majburiyatini bajarmasa, javobgarlikni o'zi zimmasiga oladi.
+6. KAFOLATLAR VA MA'SULIYAT
+Markaz o'quvchi kursni to'liq o'tagan va topshiriqlarni bajargan taqdirda darajasining oshishini kafolatlaydi.
+O'quvchi tomonidan intizom buzilishi, topshiriqlarning muntazam yuborilmasligi yoki muloqotdagi qo'pol xatti-harakatlar uchun Markaz chetlatish huquqiga ega.
+Shartnomadagi barcha shartlarni buzgan tomon ma'suliyatni o'z zimmasiga oladi.
 
 7. SHARTNOMA MUDDATI
-
-7.1. Shartnoma o'quvchi kursga ro'yxatdan o'tgan kundan kuchga kiradi.
-7.2. Kurs yakunlangach, shartnoma avtomatik tarzda o'z kuchini yo'qotadi.
+Ushbu shartnoma o'quvchi kursga ro'yxatdan o'tgan paytdan boshlab kuchga kiradi.
+Kurs yakunlangandan so'ng avtomatik ravishda o'z kuchini yo'qotadi.
 
 8. MAXSUS QOIDALAR
-
-8.1. Har bir bosqich yakunida imtihon o'tkaziladi.
-8.2. Yetarli ball to'play olmagan o'quvchi:
-
-Guruhdagi o'qishni to'xtatadi;
-
-Qayta o'qish uchun yangi to'lov qiladi yoki
-
-Mustaqil tayyorlanib, 1 haftadan so'ng qayta imtihon topshiradi.
+DIQQAT: Kurs uchun qabul hali ochilmagan.
+Hozirda barcha video darslar va manbalar sifatli shaklda tayyorlanmoqda.
+Ro'yxatdan o'tgan o'quvchilar uchun kurs ochilishi haqida oldindan xabar beriladi.
+Har bir bosqich yakunida imtihon o'tkazilib, natijalarga ko'ra keyingi bosqichga o'tiladi.
 
 9. TOMONLARNING ROZILIGI
-
-O'quvchi quyidagi "Tasdiqlayman" tugmasini bosish orqali shartlar bilan tanishganini va rozi ekanini bildiradi.
+Quyidagi "Tasdiqlayman" tugmasini bosish orqali O'quvchi shartlar bilan tanishganini va rozi ekanini bildiradi.
 """
 
 CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS users(
-    user_id BIGINT PRIMARY KEY,
+    user_id INTEGER PRIMARY KEY,
     username TEXT,
     full_name TEXT,
-    group_id BIGINT,
-    expires_at BIGINT DEFAULT 0,
+    group_id INTEGER,
+    expires_at INTEGER DEFAULT 0,
     phone TEXT,
-    agreed_at BIGINT
+    agreed_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS payments(
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
     photo_file TEXT,
     status TEXT,
-    created_at BIGINT,
-    admin_id BIGINT
+    created_at INTEGER,
+    admin_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS user_groups(
-    user_id BIGINT,
-    group_id BIGINT,
-    expires_at BIGINT,
+    user_id INTEGER,
+    group_id INTEGER,
+    expires_at INTEGER,
     PRIMARY KEY (user_id, group_id)
 );
 CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_id);
@@ -174,41 +154,58 @@ CREATE INDEX IF NOT EXISTS idx_ug_group ON user_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_ug_expires ON user_groups(expires_at);
 """
 
+def _ensure_db_dir():
+    d = os.path.dirname(DB_PATH)
+    if d and not os.path.exists(d):
+        try:
+            os.makedirs(d, exist_ok=True)
+            logger.info(f"Created database directory: {d}")
+        except Exception as e:
+            logger.warning(f"Failed to create database directory: {e}")
+
 async def db_init():
-    global db_pool
+    _ensure_db_dir()
     try:
-        db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
-        async with db_pool.acquire() as conn:
-            for statement in CREATE_SQL.split(';'):
-                statement = statement.strip()
-                if statement:
-                    await conn.execute(statement)
-        logger.info("Database initialized successfully with PostgreSQL")
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.executescript(CREATE_SQL)
+            cur = await db.execute("PRAGMA table_info(users)")
+            cols = [r[1] for r in await cur.fetchall()]
+            if "phone" not in cols:
+                await db.execute("ALTER TABLE users ADD COLUMN phone TEXT;")
+            if "agreed_at" not in cols:
+                await db.execute("ALTER TABLE users ADD COLUMN agreed_at INTEGER;")
+            await db.commit()
+        logger.info(f"Database initialized successfully at {DB_PATH}")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
 
 async def add_payment(user: Message, file_id: str) -> int:
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "INSERT INTO payments(user_id, photo_file, status, created_at) VALUES($1,$2,$3,$4) RETURNING id",
-            user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO payments(user_id, photo_file, status, created_at) VALUES(?,?,?,?)",
+            (user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp()))
         )
-        return int(row['id'])
+        await db.commit()
+        cur = await db.execute("SELECT last_insert_rowid()")
+        row = await cur.fetchone()
+        return int(row[0])
 
 async def set_payment_status(pid: int, status: str, admin_id: Optional[int]):
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE payments SET status=$1, admin_id=$2 WHERE id=$3", status, admin_id, pid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE payments SET status=?, admin_id=? WHERE id=?", (status, admin_id, pid))
+        await db.commit()
 
 async def get_payment(pid: int):
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT id, user_id, status FROM payments WHERE id=$1", pid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT id, user_id, status FROM payments WHERE id=?", (pid,))
+        return await cur.fetchone()
 
 async def upsert_user(uid: int, username: str, full_name: str, group_id: int, expires_at: int, phone: Optional[str] = None, agreed_at: Optional[int] = None):
-    async with db_pool.acquire() as conn:
-        await conn.execute("""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
             INSERT INTO users(user_id, username, full_name, group_id, expires_at, phone, agreed_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7)
+            VALUES(?,?,?,?,?,?,?)
             ON CONFLICT(user_id) DO UPDATE SET
                 username=excluded.username,
                 full_name=excluded.full_name,
@@ -216,81 +213,96 @@ async def upsert_user(uid: int, username: str, full_name: str, group_id: int, ex
                 expires_at=excluded.expires_at,
                 phone=COALESCE(excluded.phone, users.phone),
                 agreed_at=COALESCE(excluded.agreed_at, users.agreed_at)
-        """, uid, username, full_name, group_id, expires_at, phone, agreed_at)
+        """, (uid, username, full_name, group_id, expires_at, phone, agreed_at))
+        await db.commit()
 
 async def update_user_expiry(uid: int, new_expires_at: int):
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET expires_at=$1 WHERE user_id=$2", new_expires_at, uid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET expires_at=? WHERE user_id=?", (new_expires_at, uid))
+        await db.commit()
 
 async def update_user_phone(uid: int, phone: str):
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET phone=$1 WHERE user_id=$2", phone, uid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET phone=? WHERE user_id=?", (phone, uid))
+        await db.commit()
 
 async def update_user_fullname(uid: int, full_name: str):
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET full_name=$1 WHERE user_id=$2", full_name, uid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET full_name=? WHERE user_id=?", (full_name, uid))
+        await db.commit()
 
 async def update_user_agreed(uid: int, ts: int):
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET agreed_at=$1 WHERE user_id=$2", ts, uid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET agreed_at=? WHERE user_id=?", (ts, uid))
+        await db.commit()
 
 async def clear_user_group(uid: int, gid: int):
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET group_id=NULL WHERE user_id=$1 AND group_id=$2", uid, gid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET group_id=NULL WHERE user_id=? AND group_id=?", (uid, gid))
+        await db.commit()
 
 async def add_user_group(uid: int, gid: int, expires_at: int):
-    async with db_pool.acquire() as conn:
-        await conn.execute("""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
             INSERT INTO user_groups(user_id, group_id, expires_at)
-            VALUES($1,$2,$3)
+            VALUES(?,?,?)
             ON CONFLICT(user_id, group_id) DO UPDATE SET expires_at=excluded.expires_at
-        """, uid, gid, expires_at)
+        """, (uid, gid, expires_at))
+        await db.commit()
 
 async def clear_user_group_extra(uid: int, gid: int):
-    async with db_pool.acquire() as conn:
-        await conn.execute("DELETE FROM user_groups WHERE user_id=$1 AND group_id=$2", uid, gid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM user_groups WHERE user_id=? AND group_id=?", (uid, gid))
+        await db.commit()
 
 async def get_user(uid: int):
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT user_id, group_id, expires_at, username, full_name, phone, agreed_at FROM users WHERE user_id=$1", uid)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id, group_id, expires_at, username, full_name, phone, agreed_at FROM users WHERE user_id=?", (uid,))
+        return await cur.fetchone()
 
 async def all_members_of_group(gid: int):
-    async with db_pool.acquire() as conn:
-        u_rows = await conn.fetch("SELECT user_id, username, full_name, expires_at, phone FROM users WHERE group_id=$1", gid)
-        g_rows = await conn.fetch("""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id, username, full_name, expires_at, phone FROM users WHERE group_id=?", (gid,))
+        u_rows = await cur.fetchall()
+        cur = await db.execute("""
             SELECT ug.user_id, u.username, u.full_name, ug.expires_at, u.phone
             FROM user_groups ug
             LEFT JOIN users u ON u.user_id = ug.user_id
-            WHERE ug.group_id=$1
-        """, gid)
+            WHERE ug.group_id=?
+        """, (gid,))
+        g_rows = await cur.fetchall()
     merged = {}
-    for r in list(u_rows) + list(g_rows):
-        uid, username, full_name, exp, phone = r['user_id'], r['username'], r['full_name'], r['expires_at'], r['phone']
+    for r in u_rows + g_rows:
+        uid, username, full_name, exp, phone = r
         if uid not in merged or (merged[uid][2] or 0) < (exp or 0):
             merged[uid] = (username, full_name, exp, phone)
     return [(uid, data[0], data[1], data[2], data[3]) for uid, data in merged.items()]
 
 async def expired_users():
     now = int(datetime.utcnow().timestamp())
-    async with db_pool.acquire() as conn:
-        return await conn.fetch("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>0 AND expires_at<=$1", now)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>0 AND expires_at<=?", (now,))
+        return await cur.fetchall()
 
 async def expired_user_groups():
     now = int(datetime.utcnow().timestamp())
-    async with db_pool.acquire() as conn:
-        return await conn.fetch("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>0 AND expires_at<=$1", now)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>0 AND expires_at<=?", (now,))
+        return await cur.fetchall()
 
 async def soon_expiring_users(days: int):
     now = int(datetime.utcnow().timestamp())
     upper = now + days * 86400
-    async with db_pool.acquire() as conn:
-        return await conn.fetch("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>$1 AND expires_at<=$2", now, upper)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>? AND expires_at<=?", (now, upper))
+        return await cur.fetchall()
 
 async def soon_expiring_user_groups(days: int):
     now = int(datetime.utcnow().timestamp())
     upper = now + days * 86400
-    async with db_pool.acquire() as conn:
-        return await conn.fetch("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>$1 AND expires_at<=$2", now, upper)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>? AND expires_at<=?", (now, upper))
+        return await cur.fetchall()
 
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -399,94 +411,25 @@ def human_left(expires_at: int) -> tuple[str, int]:
     days_left = (dt_loc.date() - (datetime.utcnow() + TZ_OFFSET).date()).days
     return dt_loc.strftime("%Y-%m-%d"), days_left
 
-def build_contract_files(user_fullname: str, user_phone: Optional[str], user_id: int = 0):
-    # Shartnoma raqami: user_id + timestamp
-    contract_num = f"ZT-{user_id}-{int(datetime.utcnow().timestamp())}"
-    
-    stamped = f"{CONTRACT_TEXT}\n\n---\nO'quvchi: {user_fullname}\nTelefon: {user_phone or '-'}\nShartnoma raqami: {contract_num}\nSana: {(datetime.utcnow()+TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n"
+def build_contract_files(user_fullname: str, user_phone: Optional[str]):
+    stamped = f"{CONTRACT_TEXT}\n\n---\nO'quvchi: {user_fullname}\nTelefon: {user_phone or '-'}\nSana: {(datetime.utcnow()+TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n"
     txt_buf = io.BytesIO(stamped.encode("utf-8"))
     txt_buf.name = "shartnoma.txt"
     pdf_buf = None
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
-        from reportlab.lib.utils import ImageReader
-        import qrcode
-        import os
-        
         pdf_buf = io.BytesIO()
         pdf_buf.name = "shartnoma.pdf"
         c = canvas.Canvas(pdf_buf, pagesize=A4)
         width, height = A4
-        
-        # Logo qo'shish (agar logo.png fayli mavjud bo'lsa)
-        logo_path = "logo.png"
-        if os.path.exists(logo_path):
-            try:
-                # Logotipni yuqori o'rtada joylashtirish (100x100 piksel)
-                logo_width = 100
-                logo_height = 100
-                x_centered = (width - logo_width) / 2
-                y_top = height - logo_height - 20
-                c.drawImage(logo_path, x_centered, y_top, width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
-                # Logo ostidan matn boshlash
-                y = y_top - 30
-            except Exception as logo_err:
-                logger.warning(f"Logo qo'shishda xatolik: {logo_err}")
-                y = height - 40
-        else:
-            y = height - 40
-        
-        # Shartnoma matni
+        y = height - 40
         for line in stamped.splitlines():
             c.drawString(40, y, line[:110])
             y -= 14
             if y < 40:
                 c.showPage()
                 y = height - 40
-        
-        # Markaz ma'lumotlari (pastda)
-        y -= 20  # Bo'sh joy
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(40, y, "Markaz ma'lumotlari:")
-        y -= 15
-        c.setFont("Helvetica", 9)
-        c.drawString(40, y, "Markaz nomi: Zamonaviy Ta'lim")
-        y -= 12
-        c.drawString(40, y, f"Guvohnoma raqami: 2895972")
-        y -= 12
-        c.drawString(40, y, f"Tasdiqnoma raqami: 929919")
-        y -= 12
-        c.drawString(40, y, f"Website: www.zamomaytalim.uz")
-        y -= 12
-        c.drawString(40, y, f"Aloqa: @zamonaviytalimuz")
-        y -= 12
-        c.drawString(40, y, f"Shartnoma raqami: {contract_num}")
-        
-        # QR kod yaratish va joylashtirish (o'ng pastda)
-        try:
-            qr = qrcode.QRCode(version=1, box_size=3, border=1)
-            qr.add_data("https://t.me/zamonaviymedia")
-            qr.make(fit=True)
-            qr_img = qr.make_image(fill_color="black", back_color="white")
-            
-            # QR kodni BytesIO'ga saqlash
-            qr_buffer = io.BytesIO()
-            qr_img.save(qr_buffer, format='PNG')
-            qr_buffer.seek(0)
-            
-            # QR kodni o'ng pastga joylashtirish
-            qr_size = 80
-            qr_x = width - qr_size - 40
-            qr_y = 40
-            c.drawImage(ImageReader(qr_buffer), qr_x, qr_y, width=qr_size, height=qr_size)
-            
-            # QR kod ostida matn
-            c.setFont("Helvetica", 7)
-            c.drawString(qr_x, qr_y - 10, "Telegram kanal")
-        except Exception as qr_err:
-            logger.warning(f"QR kod qo'shishda xatolik: {qr_err}")
-        
         c.save()
         pdf_buf.seek(0)
     except Exception as e:
@@ -572,72 +515,6 @@ async def cmd_expiring(m: Message):
         logger.error(f"Error in cmd_expiring: {e}")
         await m.answer("Xatolik yuz berdi.")
 
-@dp.message(Command("addgroup"))
-async def cmd_addgroup(m: Message):
-    """Yangi guruh qo'shish: /addgroup <GROUP_ID>"""
-    if not is_admin(m.from_user.id):
-        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
-    
-    try:
-        parts = m.text.split()
-        if len(parts) != 2:
-            return await m.answer("❌ Noto'g'ri format!\n\nTo'g'ri: /addgroup <GROUP_ID>\nMasalan: /addgroup -1002345678")
-        
-        group_id = parts[1].strip()
-        if not group_id.lstrip("-").isdigit():
-            return await m.answer("❌ GROUP_ID raqam bo'lishi kerak!\nMasalan: /addgroup -1002345678")
-        
-        gid = int(group_id)
-        
-        if gid in GROUP_IDS:
-            return await m.answer(f"⚠️ Bu guruh allaqachon qo'shilgan: {gid}")
-        
-        try:
-            chat = await bot.get_chat(gid)
-            title = chat.title or str(gid)
-        except Exception as e:
-            return await m.answer(f"❌ Guruh topilmadi yoki bot guruhda emas!\nXato: {e}\n\nBot'ni avval guruhga admin qilib qo'shing.")
-        
-        GROUP_IDS.append(gid)
-        await m.answer(f"✅ Yangi guruh qo'shildi!\n\n• Guruh: {title}\n• ID: `{gid}`\n\n📝 Eslatma: Bot qayta ishga tushganda, bu guruhni PRIVATE_GROUP_ID ga qo'shishni unutmang!", parse_mode="Markdown")
-    
-    except Exception as e:
-        logger.error(f"Error in cmd_addgroup: {e}")
-        await m.answer(f"Xatolik yuz berdi: {e}")
-
-@dp.message(Command("removegroup"))
-async def cmd_removegroup(m: Message):
-    """Guruhni o'chirish: /removegroup <GROUP_ID>"""
-    if not is_admin(m.from_user.id):
-        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
-    
-    try:
-        parts = m.text.split()
-        if len(parts) != 2:
-            return await m.answer("❌ Noto'g'ri format!\n\nTo'g'ri: /removegroup <GROUP_ID>\nMasalan: /removegroup -1002345678")
-        
-        group_id = parts[1].strip()
-        if not group_id.lstrip("-").isdigit():
-            return await m.answer("❌ GROUP_ID raqam bo'lishi kerak!\nMasalan: /removegroup -1002345678")
-        
-        gid = int(group_id)
-        
-        if gid not in GROUP_IDS:
-            return await m.answer(f"⚠️ Bu guruh ro'yxatda yo'q: {gid}")
-        
-        try:
-            chat = await bot.get_chat(gid)
-            title = chat.title or str(gid)
-        except Exception:
-            title = str(gid)
-        
-        GROUP_IDS.remove(gid)
-        await m.answer(f"❌ Guruh o'chirildi!\n\n• Guruh: {title}\n• ID: `{gid}`\n\n📝 Eslatma: Bot qayta ishga tushganda, PRIVATE_GROUP_ID dan ham o'chiring!", parse_mode="Markdown")
-    
-    except Exception as e:
-        logger.error(f"Error in cmd_removegroup: {e}")
-        await m.answer(f"Xatolik yuz berdi: {e}")
-
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
     if not is_admin(m.from_user.id):
@@ -657,12 +534,15 @@ async def cmd_stats(m: Message):
     
     now = int(datetime.utcnow().timestamp())
     try:
-        async with db_pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM users")
-            active = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expires_at > $1", now)
-            expired = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expires_at <= $1 AND expires_at > 0", now)
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute("SELECT COUNT(*) FROM users")
+            total = (await cur.fetchone())[0]
+            cur = await db.execute("SELECT COUNT(*) FROM users WHERE expires_at > ?", (now,))
+            active = (await cur.fetchone())[0]
+            cur = await db.execute("SELECT COUNT(*) FROM users WHERE expires_at <= ? AND expires_at > 0", (now,))
+            expired = (await cur.fetchone())[0]
     except Exception as e:
-        return await m.answer(f"💾 DB xatosi: {e}")
+        return await m.answer(f"💾 DB xatosi: {e}\nDB_PATH: {DB_PATH}")
     
     header = (
         "📊 Statistika (umumiy)\n"
@@ -797,7 +677,7 @@ async def on_admin_date_handler(m: Message):
                 full_name = full_name.strip() or f"User{m.from_user.id}"
                 await update_user_fullname(m.from_user.id, full_name)
                 
-                txt_buf, pdf_buf = build_contract_files(full_name, phone, m.from_user.id)
+                txt_buf, pdf_buf = build_contract_files(full_name, phone)
                 try:
                     await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
                     if pdf_buf:
@@ -843,7 +723,7 @@ async def on_contact(m: Message):
             full_name = f"User{m.from_user.id}"
         await update_user_fullname(m.from_user.id, full_name)
         
-        txt_buf, pdf_buf = build_contract_files(full_name, phone, m.from_user.id)
+        txt_buf, pdf_buf = build_contract_files(full_name, phone)
         try:
             await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
             if pdf_buf:
@@ -869,45 +749,16 @@ async def on_contact(m: Message):
 
 @dp.callback_query(F.data == "pay_card")
 async def cb_pay_card(c: CallbackQuery):
-    # To'lov ma'lumotlari
-    await c.message.answer(
-        "💳 *Karta orqali to'lov*\n\n"
-        "Karta raqami: `9860160130847827`\n"
-        "Egasi: H.Halikova\n\n"
-        "To'lovdan so'ng chekni shu chatga yuboring.",
-        parse_mode="Markdown"
-    )
-    # Yo'riqnoma alohida xabar
-    await c.message.answer(
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "📹 *To'lov qilish bo'yicha video yo'riqnoma:*\n\n"
-        "👇 Quyidagi linkni bosing:\n"
-        "🔗 https://youtu.be/Ymj42lZ16zw\n"
-        "━━━━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown"
-    )
+    await c.message.answer("💳 Karta raqami:\n 9860160130847827 H.Halikova ")
     await c.answer()
 
 @dp.callback_query(F.data == "pay_link")
 async def cb_pay_link(c: CallbackQuery):
-    # To'lov havolalari
     await c.message.answer(
-        "🔗 *Havola orqali to'lov*\n\n"
-        "💚 *PAYME:*\n"
-        "https://payme.uz/fallback/merchant/?id=68aebaff42ec20bb02a46c8c\n\n"
-        "💙 *CLICK:*\n"
-        "https://indoor.click.uz/pay?id=081968&t=0\n\n"
-        "To'lovdan so'ng chekni shu chatga yuboring.",
-        parse_mode="Markdown"
-    )
-    # Yo'riqnoma alohida xabar
-    await c.message.answer(
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "📹 *To'lov qilish bo'yicha video yo'riqnoma:*\n\n"
-        "👇 Quyidagi linkni bosing:\n"
-        "🔗 https://youtu.be/Ymj42lZ16zw\n"
-        "━━━━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown"
+        "🔗 To'lov havolasi\n"
+        "PAYME ORQALI: https://payme.uz/fallback/merchant/?id=68aebaff42ec20bb02a46c8c\n\n"
+        "To'lovdan so'ng chekni shu chatga yuboring.\n"
+        "CLICK ORQALI: https://indoor.click.uz/pay?id=081968&t=0 "
     )
     await c.answer()
 
@@ -1089,7 +940,7 @@ async def cb_ms_confirm(c: CallbackQuery):
             await bot.send_message(
                 user_id,
                 "✅ To'lov tasdiqlandi!\n"
-                f"Quyidagi guruhlarga kirish havolalari (har biri 1 martalik, 1 kun ichida):\n"
+                f"Quyidagi guruhlarga kirish havolalari (har biri 1 martalik, {INVITE_LINK_EXPIRE_HOURS} soat ichida):\n"
                 + "\n".join(links_out) +
                 f"\n\n⏳ Obuna tugash sanasi: {human_exp}"
             )
@@ -1139,7 +990,7 @@ async def cb_pick_group(c: CallbackQuery):
             await bot.send_message(
                 user_id,
                 "✅ To'lov tasdiqlandi!\n"
-                f"Guruhga kirish havolasi (1 martalik, 1 kun ichida):\n{link}\n\n"
+                f"Guruhga kirish havolasi (1 martalik, {INVITE_LINK_EXPIRE_HOURS} soat ichida):\n{link}\n\n"
                 f"⏳ Obuna tugash sanasi: {human_exp}"
             )
         except Exception as e:

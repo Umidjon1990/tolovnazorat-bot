@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["freetype", "glibcLocales", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "postgresql", "tcl", "tk", "zlib"]
+packages = ["freetype", "glibcLocales"]
 
 [workflows]
 runButton = "Project"
@@ -30,6 +30,5 @@ args = "python main.py"
 outputType = "console"
 
 [deployment]
-deploymentTarget = "vm"
-run = ["python", "main.py"]
-ignorePorts = true
+deploymentTarget = "cloudrun"
+run = ["sh", "-c", "/nix/store/cn7gx98bvd6qj3jrh5v21q868nlv2jv6-python3-wrapper/bin/python3 $file"]
