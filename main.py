@@ -347,6 +347,34 @@ def contract_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="❌ Rad etaman", callback_data="terms_decline")]
     ])
 
+def course_selection_keyboard() -> InlineKeyboardMarkup:
+    courses = [
+        ("A0 Standard", "course:A0 Standard"),
+        ("A0 Premium", "course:A0 Premium"),
+        ("A1 Standard", "course:A1 Standard"),
+        ("A1 Premium", "course:A1 Premium"),
+        ("A2 Standard", "course:A2 Standard"),
+        ("A2 Premium", "course:A2 Premium"),
+        ("B1 Standard", "course:B1 Standard"),
+        ("B1 Premium", "course:B1 Premium"),
+        ("B2 Standard", "course:B2 Standard"),
+        ("B2 Premium", "course:B2 Premium"),
+        ("CEFR PRO Standard", "course:CEFR PRO Standard"),
+        ("CEFR PRO Premium", "course:CEFR PRO Premium"),
+        ("Grammatika Standard", "course:Grammatika Standard"),
+        ("Grammatika Premium", "course:Grammatika Premium"),
+    ]
+    
+    keyboard = []
+    for i in range(0, len(courses), 2):
+        row = []
+        row.append(InlineKeyboardButton(text=courses[i][0], callback_data=courses[i][1]))
+        if i + 1 < len(courses):
+            row.append(InlineKeyboardButton(text=courses[i + 1][0], callback_data=courses[i + 1][1]))
+        keyboard.append(row)
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 def contact_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Telefon raqamni yuborish", request_contact=True)]],
