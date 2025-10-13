@@ -8,7 +8,7 @@ This is a Telegram bot application built using the aiogram framework (Python). T
 - **Streamlined User Flow**: Contract → Course Selection (buttons) → Phone → Payment - clean and intuitive
 - **Auto-Migration System**: Database migration runs on startup - `course_name` column created if missing
 - **Admin Button Interface**: Persistent reply keyboard for admins - "📊 Statistika", "✅ Tasdiqlangan to'lovlar", "⏳ Kutilayotgan to'lovlar", and "🧹 Tozalash" buttons always visible (no need to press /start)
-- **Chat Cleanup Feature**: New "🧹 Tozalash" button deletes last 50 bot messages from admin chat, shows confirmation for 3 seconds, restores admin panel automatically
+- **Chat Cleanup Feature**: New "🧹 Tozalash" button deletes last 300 bot messages from admin chat (full cleanup), shows confirmation for 3 seconds, restores admin panel automatically
 - **Tasdiqlangan to'lovlar Pagination**: When admin clicks "Tasdiqlangan to'lovlar" button, shows options: "Oxirgi 3 tasi" (last 3) or "Hammasi" (all approved payments) with multi-group support
 - **Kutilayotgan to'lovlar**: Shows all pending payments with approval buttons, or "Kutilayotgan to'lovlar mavjud emas" if empty
 - **Multi-group Display**: Approved payments now show all assigned groups for each user (comma-separated list)
