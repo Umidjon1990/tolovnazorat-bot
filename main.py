@@ -423,7 +423,8 @@ def admin_main_keyboard() -> InlineKeyboardMarkup:
     """Admin uchun asosiy tugmalar."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📋 To'lovlar", callback_data="admin_payments")]
+        [InlineKeyboardButton(text="✅ Tasdiqlangan to'lovlar", callback_data="admin_payments_approved")],
+        [InlineKeyboardButton(text="⏳ Kutilayotgan to'lovlar", callback_data="admin_payments_pending")]
     ])
 
 @dp.message(Command("start"))
@@ -892,9 +893,9 @@ async def cb_admin_stats(c: CallbackQuery):
     
     await c.answer()
 
-@dp.callback_query(F.data == "admin_payments")
-async def cb_admin_payments(c: CallbackQuery):
-    """Admin To'lovlar tugmasi handleri - tasdiqlangan to'lovlar."""
+@dp.callback_query(F.data == "admin_payments_approved")
+async def cb_admin_payments_approved(c: CallbackQuery):
+    """Admin Tasdiqlangan to'lovlar tugmasi handleri."""
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
@@ -905,7 +906,7 @@ async def cb_admin_payments(c: CallbackQuery):
         )
         
         if not approved_payments:
-            await c.message.answer("📋 Hozircha tasdiqlangan to'lovlar yo'q.")
+            await c.message.answer("✅ Hozircha tasdiqlangan to'lovlar yo'q.")
             return await c.answer()
         
         titles = dict(await resolve_group_titles())
@@ -955,7 +956,61 @@ async def cb_admin_payments(c: CallbackQuery):
         
         await c.answer()
     except Exception as e:
-        logger.error(f"Error in cb_admin_payments: {e}")
+        logger.error(f"Error in cb_admin_payments_approved: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data == "admin_payments_pending")
+async def cb_admin_payments_pending(c: CallbackQuery):
+    """Admin Kutilayotgan to'lovlar tugmasi handleri."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        # Kutilayotgan to'lovlarni olish
+        pending_payments = await db_pool.fetch(
+            "SELECT id, user_id, photo_file_id FROM payments WHERE status = 'pending' ORDER BY id ASC"
+        )
+        
+        if not pending_payments:
+            await c.message.answer("⏳ Hozirda kutilayotgan to'lovlar yo'q.")
+            return await c.answer()
+        
+        # Har bir to'lov uchun ma'lumot yuborish
+        for payment in pending_payments:
+            pid = payment['id']
+            uid = payment['user_id']
+            photo_file_id = payment['photo_file_id']
+            
+            # User ma'lumotlarini olish
+            user_row = await get_user(uid)
+            if not user_row:
+                continue
+            
+            username = user_row[1] if len(user_row) > 1 else None
+            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            phone = user_row[5] if len(user_row) > 5 else "yo'q"
+            
+            # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
+            agreed_at = user_row[4] if len(user_row) > 4 else None
+            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at else "yo'q"
+            
+            kb = approve_keyboard(pid)
+            username_str = f"@{username}" if username else "yo'q"
+            caption = (
+                f"⏳ *Kutilayotgan to'lov*\n\n"
+                f"👤 Ism: {full_name}\n"
+                f"📱 Username: {username_str}\n"
+                f"📞 Telefon: {phone}\n"
+                f"📄 Shartnoma: {contract_date}\n"
+                f"🆔 User ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`"
+            )
+            
+            await c.message.answer_photo(photo_file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+        
+        await c.answer()
+    except Exception as e:
+        logger.error(f"Error in cb_admin_payments_pending: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("ap_date:"))
