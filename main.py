@@ -230,6 +230,10 @@ async def update_user_agreed(uid: int, ts: int):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET agreed_at=$1 WHERE user_id=$2", ts, uid)
 
+async def update_user_course(uid: int, course_name: str):
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET course_name=$1 WHERE user_id=$2", course_name, uid)
+
 async def clear_user_group(uid: int, gid: int):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET group_id=NULL WHERE user_id=$1 AND group_id=$2", uid, gid)
@@ -515,10 +519,7 @@ async def cb_course_select(c: CallbackQuery):
         course_name = c.data.split(":", 1)[1]
         
         # Database'ga kurs nomini saqlash
-        await execute_query(
-            "UPDATE users SET course_name = $1 WHERE user_id = $2",
-            course_name, c.from_user.id
-        )
+        await update_user_course(c.from_user.id, course_name)
         
         WAIT_CONTACT_FOR.add(c.from_user.id)
         await c.message.answer(
@@ -1163,11 +1164,9 @@ async def on_photo(m: Message):
         phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
         
         # Kurs nomini olish
-        course_row = await execute_query(
-            "SELECT course_name FROM users WHERE user_id = $1",
-            m.from_user.id
-        )
-        course_name = course_row[0]['course_name'] if course_row and course_row[0].get('course_name') else "Kiritilmagan"
+        async with db_pool.acquire() as conn:
+            course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", m.from_user.id)
+        course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
         
         kb = approve_keyboard(pid)
         caption = (
@@ -1585,11 +1584,9 @@ async def cb_ms_confirm(c: CallbackQuery):
             username_str = f"@{username}" if username else "username yo'q"
             
             # Kurs nomini olish
-            course_row = await execute_query(
-                "SELECT course_name FROM users WHERE user_id = $1",
-                user_id
-            )
-            course_name = course_row[0]['course_name'] if course_row and course_row[0].get('course_name') else "Kiritilmagan"
+            async with db_pool.acquire() as conn:
+                course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", user_id)
+            course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
             
             final_caption = (
                 f"✅ *HAVOLALAR YUBORILDI*\n\n"
@@ -1688,11 +1685,9 @@ async def cb_pick_group(c: CallbackQuery):
             username_str = f"@{username}" if username else "username yo'q"
             
             # Kurs nomini olish
-            course_row = await execute_query(
-                "SELECT course_name FROM users WHERE user_id = $1",
-                user_id
-            )
-            course_name = course_row[0]['course_name'] if course_row and course_row[0].get('course_name') else "Kiritilmagan"
+            async with db_pool.acquire() as conn:
+                course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", user_id)
+            course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
             
             final_caption = (
                 f"✅ *HAVOLA YUBORILDI*\n\n"
