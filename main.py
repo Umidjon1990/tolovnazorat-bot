@@ -875,11 +875,12 @@ async def cb_approved_last3(c: CallbackQuery):
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            username_str = f"@{username}" if username else "yo'q"
+            username_str = f"@{username}" if username else "Username yo'q"
+            user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 Ism: {full_name}\n"
-                f"📱 Username: {username_str}\n"
+                f"👤 Ism: {user_link}\n"
+                f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
                 f"⏳ Obuna tugashi: {expiry_date}\n"
@@ -944,11 +945,12 @@ async def cb_approved_all(c: CallbackQuery):
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            username_str = f"@{username}" if username else "yo'q"
+            username_str = f"@{username}" if username else "Username yo'q"
+            user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 Ism: {full_name}\n"
-                f"📱 Username: {username_str}\n"
+                f"👤 Ism: {user_link}\n"
+                f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
                 f"⏳ Obuna tugashi: {expiry_date}\n"
@@ -1004,11 +1006,12 @@ async def admin_pending_button(m: Message):
             contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
-            username_str = f"@{username}" if username else "yo'q"
+            username_str = f"@{username}" if username else "Username yo'q"
+            user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
-                f"👤 Ism: {full_name}\n"
-                f"📱 Username: {username_str}\n"
+                f"👤 Ism: {user_link}\n"
+                f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📄 Shartnoma: {contract_date}\n"
                 f"🆔 User ID: `{uid}`\n"
@@ -1413,11 +1416,12 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
-            username_str = f"@{username}" if username else "yo'q"
+            username_str = f"@{username}" if username else "Username yo'q"
+            user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
-                f"👤 Ism: {full_name}\n"
-                f"📱 Username: {username_str}\n"
+                f"👤 Ism: {user_link}\n"
+                f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📄 Shartnoma: {contract_date}\n"
                 f"🆔 User ID: `{uid}`\n"
