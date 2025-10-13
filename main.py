@@ -1105,22 +1105,19 @@ async def cb_pay_link(c: CallbackQuery):
 @dp.message(F.photo)
 async def on_photo(m: Message):
     try:
-        # Caption'dan kurs nomini olish va saqlash
-        course_name = "Kiritilmagan"
-        if m.caption and m.caption.strip():
-            course_name = m.caption.strip()
-            # Database'ga saqlash
-            await execute_query(
-                "UPDATE users SET course_name = $1 WHERE user_id = $2",
-                course_name, m.from_user.id
-            )
-        
         pid = await add_payment(m, m.photo[-1].file_id)
         await m.answer("✅ Chekingiz qabul qilindi. Admin tekshiradi.")
         
         # User ma'lumotlarini olish
         user_row = await get_user(m.from_user.id)
         phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+        
+        # Kurs nomini olish
+        course_row = await execute_query(
+            "SELECT course_name FROM users WHERE user_id = $1",
+            m.from_user.id
+        )
+        course_name = course_row[0]['course_name'] if course_row and course_row[0].get('course_name') else "Kiritilmagan"
         
         kb = approve_keyboard(pid)
         caption = (
