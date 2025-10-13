@@ -241,9 +241,12 @@ Logs'ni tekshiring
 ## 🔐 Xavfsizlik
 
 ✅ Telegram initData imzo bilan tekshiriladi  
+✅ **Auth freshness validation** - 24 soatdan eski tokenlar rad etiladi (replay attack oldini olish)  
 ✅ Har bir so'rov autentifikatsiya qilinadi  
 ✅ Admin funksiyalar ADMIN_IDS orqali himoyalangan  
 ✅ File upload xavfsiz (uploads/ papkaga)  
+
+**Muhim:** Telegram initData 24 soat ichida amal qiladi. Agar user Mini App'ni 24 soatdan keyin ochsa, Telegram yangi initData yuboradi.  
 
 ---
 

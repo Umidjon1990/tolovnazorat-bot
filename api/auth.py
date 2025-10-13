@@ -1,6 +1,7 @@
 import os
 import hmac
 import hashlib
+import time
 from urllib.parse import parse_qsl
 from fastapi import HTTPException, Header
 from typing import Dict, Optional
@@ -9,9 +10,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN not found")
 
+MAX_AUTH_AGE = 86400
+
 def verify_telegram_init_data(init_data: str) -> Dict:
     """
-    Verify Telegram Mini App initData signature
+    Verify Telegram Mini App initData signature and freshness
     Returns user data if valid, raises HTTPException if invalid
     """
     try:
@@ -21,6 +24,15 @@ def verify_telegram_init_data(init_data: str) -> Dict:
             raise HTTPException(status_code=401, detail="Invalid initData: missing hash")
         
         received_hash = parsed_data.pop('hash')
+        
+        if 'auth_date' in parsed_data:
+            auth_date = int(parsed_data['auth_date'])
+            current_time = int(time.time())
+            
+            if current_time - auth_date > MAX_AUTH_AGE:
+                raise HTTPException(status_code=401, detail="initData expired (older than 24 hours)")
+        else:
+            raise HTTPException(status_code=401, detail="Invalid initData: missing auth_date")
         
         data_check_arr = [f"{k}={v}" for k, v in sorted(parsed_data.items())]
         data_check_string = '\n'.join(data_check_arr)
