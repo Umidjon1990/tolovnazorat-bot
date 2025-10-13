@@ -543,15 +543,26 @@ async def cmd_stats(m: Message):
                         for uid, username, full_name, exp, phone in users 
                         if exp and exp > now]
         
+        # Telegram API orqali guruhda turganlarni tekshirish
+        real_members = []
+        for uid, username, full_name, exp, phone in active_users:
+            try:
+                member = await bot.get_chat_member(gid, uid)
+                if member.status in ["member", "administrator", "creator"]:
+                    real_members.append((uid, username, full_name, exp, phone))
+            except Exception:
+                # Agar user topilmasa yoki xato bo'lsa, o'tkazib yuboramiz
+                pass
+        
         title = titles.get(gid, str(gid))
-        if not active_users:
+        if not real_members:
             await m.answer(f"🏷 {title} — 0 a'zo")
             continue
         
-        lines = [f"🏷 {title} — {len(active_users)} a'zo"]
+        lines = [f"🏷 {title} — {len(real_members)} a'zo"]
         now_loc_date = (datetime.utcnow() + TZ_OFFSET).date()
         MAX_SHOW = 40
-        users_sorted = sorted(active_users, key=lambda r: (r[3] or 0), reverse=True)
+        users_sorted = sorted(real_members, key=lambda r: (r[3] or 0), reverse=True)
         for i, (uid, username, full_name, exp, phone) in enumerate(users_sorted[:MAX_SHOW], start=1):
             tag = f"@{username}" if username else (full_name or uid)
             phone_s = f" 📞 {phone}" if phone else ""
