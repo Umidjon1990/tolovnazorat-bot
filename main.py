@@ -68,6 +68,7 @@ WAIT_DATE_FOR: dict[int, int] = {}
 MULTI_PICK: dict[int, dict] = {}
 WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
+WAIT_COURSE_FOR: set[int] = set()  # Kurs nomini kutayotgan userlar
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 # Admin xabarlarini kuzatish (payment_id -> [message_ids])
 ADMIN_MESSAGES: dict[int, list[int]] = {}
@@ -456,8 +457,14 @@ async def cmd_start(m: Message):
 async def cb_terms_agree(c: CallbackQuery):
     try:
         await update_user_agreed(c.from_user.id, int(datetime.utcnow().timestamp()))
-        WAIT_CONTACT_FOR.add(c.from_user.id)
-        await c.message.answer("✅ Shartnoma tasdiqlandi.\n\nIltimos, 📱 *telefon raqamingizni* yuboring:", reply_markup=contact_keyboard(), parse_mode="Markdown")
+        WAIT_COURSE_FOR.add(c.from_user.id)
+        await c.message.answer(
+            "✅ Shartnoma tasdiqlandi.\n\n"
+            "📚 Quyidagi kurslardan qay birini tanladingiz?\n\n"
+            "Masalan: *A1 standard* yoki *A1 premium*\n\n"
+            "Kurs nomini yozing:",
+            parse_mode="Markdown"
+        )
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_terms_agree: {e}")
@@ -1033,6 +1040,40 @@ async def on_admin_date_handler(m: Message):
                 await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
         return
 
+@dp.message(F.text)
+async def on_course_name(m: Message):
+    """Kurs nomini qabul qilish."""
+    if m.from_user.id not in WAIT_COURSE_FOR:
+        return
+    
+    # Admin date handler va boshqa handlerlar uchun skip
+    if m.from_user.id in WAIT_DATE_FOR:
+        return
+    
+    try:
+        course_name = m.text.strip()
+        if len(course_name) < 2:
+            return await m.answer("❌ Kurs nomi juda qisqa. Iltimos, qaytadan kiriting:")
+        
+        # Database'ga kurs nomini saqlash
+        await execute_query(
+            "UPDATE users SET course_name = $1 WHERE user_id = $2",
+            course_name, m.from_user.id
+        )
+        
+        WAIT_COURSE_FOR.discard(m.from_user.id)
+        WAIT_CONTACT_FOR.add(m.from_user.id)
+        
+        await m.answer(
+            f"✅ Kurs: *{course_name}*\n\n"
+            "Endi 📱 *telefon raqamingizni* yuboring:",
+            reply_markup=contact_keyboard(),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error in on_course_name: {e}")
+        await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+
 @dp.message(F.contact)
 async def on_contact(m: Message):
     if m.from_user.id not in WAIT_CONTACT_FOR:
@@ -1098,11 +1139,19 @@ async def on_photo(m: Message):
         user_row = await get_user(m.from_user.id)
         phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
         
+        # Kurs nomini olish
+        course_row = await execute_query(
+            "SELECT course_name FROM users WHERE user_id = $1",
+            m.from_user.id
+        )
+        course_name = course_row[0]['course_name'] if course_row and course_row[0].get('course_name') else "Kiritilmagan"
+        
         kb = approve_keyboard(pid)
         caption = (
             f"🧾 *Yangi to'lov cheki*\n\n"
             f"👤 Ism: {m.from_user.full_name}\n"
             f"📱 Telefon: {phone}\n"
+            f"📚 Kurs: {course_name}\n"
             f"🆔 ID: `{m.from_user.id}`\n"
             f"💳 Payment ID: `{pid}`\n"
             f"📅 Vaqt: {(datetime.utcnow() + TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}"
@@ -1512,11 +1561,19 @@ async def cb_ms_confirm(c: CallbackQuery):
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
             username_str = f"@{username}" if username else "username yo'q"
             
+            # Kurs nomini olish
+            course_row = await execute_query(
+                "SELECT course_name FROM users WHERE user_id = $1",
+                user_id
+            )
+            course_name = course_row[0]['course_name'] if course_row and course_row[0].get('course_name') else "Kiritilmagan"
+            
             final_caption = (
                 f"✅ *HAVOLALAR YUBORILDI*\n\n"
                 f"👤 {full_name}\n"
                 f"📱 {username_str}\n"
                 f"📞 Telefon: {phone}\n"
+                f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruhlar: {group_names}\n"
                 f"⏳ Tugash: {human_exp}"
             )
@@ -1607,11 +1664,19 @@ async def cb_pick_group(c: CallbackQuery):
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
             username_str = f"@{username}" if username else "username yo'q"
             
+            # Kurs nomini olish
+            course_row = await execute_query(
+                "SELECT course_name FROM users WHERE user_id = $1",
+                user_id
+            )
+            course_name = course_row[0]['course_name'] if course_row and course_row[0].get('course_name') else "Kiritilmagan"
+            
             final_caption = (
                 f"✅ *HAVOLA YUBORILDI*\n\n"
                 f"👤 {full_name}\n"
                 f"📱 {username_str}\n"
                 f"📞 Telefon: {phone}\n"
+                f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruh: {group_name}\n"
                 f"⏳ Tugash: {human_exp}"
             )
