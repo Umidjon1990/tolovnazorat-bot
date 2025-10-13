@@ -902,7 +902,7 @@ async def cb_admin_payments_approved(c: CallbackQuery):
     try:
         # Tasdiqlangan to'lovlarni olish
         approved_payments = await db_pool.fetch(
-            "SELECT id, user_id, photo_file_id, admin_id, created_at FROM payments WHERE status = 'approved' ORDER BY id DESC LIMIT 50"
+            "SELECT id, user_id, photo_file, admin_id, created_at FROM payments WHERE status = 'approved' ORDER BY id DESC LIMIT 50"
         )
         
         if not approved_payments:
@@ -915,7 +915,7 @@ async def cb_admin_payments_approved(c: CallbackQuery):
         for payment in approved_payments:
             pid = payment['id']
             uid = payment['user_id']
-            photo_file_id = payment['photo_file_id']
+            photo_file_id = payment['photo_file']
             admin_id = payment['admin_id']
             created_at = payment['created_at']
             
@@ -968,7 +968,7 @@ async def cb_admin_payments_pending(c: CallbackQuery):
     try:
         # Kutilayotgan to'lovlarni olish
         pending_payments = await db_pool.fetch(
-            "SELECT id, user_id, photo_file_id FROM payments WHERE status = 'pending' ORDER BY id ASC"
+            "SELECT id, user_id, photo_file FROM payments WHERE status = 'pending' ORDER BY id ASC"
         )
         
         if not pending_payments:
@@ -979,7 +979,7 @@ async def cb_admin_payments_pending(c: CallbackQuery):
         for payment in pending_payments:
             pid = payment['id']
             uid = payment['user_id']
-            photo_file_id = payment['photo_file_id']
+            photo_file_id = payment['photo_file']
             
             # User ma'lumotlarini olish
             user_row = await get_user(uid)
@@ -1192,7 +1192,17 @@ async def cb_ms_confirm(c: CallbackQuery):
                 f"🏫 Guruhlar: {group_names}\n"
                 f"⏳ Tugash: {human_exp}"
             )
-            await bot.send_photo(c.from_user.id, photo_file_id, caption=final_caption, parse_mode="Markdown")
+            final_msg = await bot.send_photo(c.from_user.id, photo_file_id, caption=final_caption, parse_mode="Markdown")
+            
+            # 10 sekunddan keyin yakuniy xulosa xabarini o'chirish
+            async def delete_after_delay():
+                await asyncio.sleep(10)
+                try:
+                    await bot.delete_message(c.from_user.id, final_msg.message_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete final summary message: {e}")
+            
+            asyncio.create_task(delete_after_delay())
         except Exception as e:
             logger.warning(f"Failed to send final summary: {e}")
         
@@ -1277,7 +1287,17 @@ async def cb_pick_group(c: CallbackQuery):
                 f"🏫 Guruh: {group_name}\n"
                 f"⏳ Tugash: {human_exp}"
             )
-            await bot.send_photo(c.from_user.id, photo_file_id, caption=final_caption, parse_mode="Markdown")
+            final_msg = await bot.send_photo(c.from_user.id, photo_file_id, caption=final_caption, parse_mode="Markdown")
+            
+            # 10 sekunddan keyin yakuniy xulosa xabarini o'chirish
+            async def delete_after_delay():
+                await asyncio.sleep(10)
+                try:
+                    await bot.delete_message(c.from_user.id, final_msg.message_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete final summary message: {e}")
+            
+            asyncio.create_task(delete_after_delay())
         except Exception as e:
             logger.warning(f"Failed to send final summary: {e}")
         
