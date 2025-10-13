@@ -4,8 +4,9 @@ This is a Telegram bot application built using the aiogram framework (Python). T
 
 # Recent Changes (October 13, 2025)
 
+- **Course Selection Feature**: Added course tracking - after contract acceptance, users select their course (e.g., "A1 standard", "A1 premium"), stored in database and displayed in payment receipts and final summaries
 - **Admin Button Interface**: Persistent reply keyboard for admins - "📊 Statistika", "✅ Tasdiqlangan to'lovlar", "⏳ Kutilayotgan to'lovlar", and "🧹 Tozalash" buttons always visible (no need to press /start)
-- **Chat Cleanup Feature**: New "🧹 Tozalash" button deletes last 50 bot messages from admin chat, shows confirmation for 3 seconds, then auto-deletes (keeps chat clean for new payments)
+- **Chat Cleanup Feature**: New "🧹 Tozalash" button deletes last 50 bot messages from admin chat, shows confirmation for 3 seconds, restores admin panel automatically
 - **Tasdiqlangan to'lovlar Pagination**: When admin clicks "Tasdiqlangan to'lovlar" button, shows options: "Oxirgi 3 tasi" (last 3) or "Hammasi" (all approved payments) with multi-group support
 - **Kutilayotgan to'lovlar**: Shows all pending payments with approval buttons, or "Kutilayotgan to'lovlar mavjud emas" if empty
 - **Multi-group Display**: Approved payments now show all assigned groups for each user (comma-separated list)
@@ -53,7 +54,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Rationale**: Production-ready relational database with ACID compliance, perfect for Railway deployment with persistent volumes
 - **Design**: Connection pooling (2-10 connections) for optimal performance and fully asynchronous operations
 - **Tables**:
-  - `users`: Core user information with subscription details
+  - `users`: Core user information with subscription details (includes `course_name` field for tracking selected course)
   - `payments`: Payment records with approval status
   - `user_groups`: Many-to-many relationship for multi-group access
 - **Migration**: Migrated from SQLite to PostgreSQL (October 13, 2025) for Railway deployment stability
@@ -99,11 +100,12 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 ### User Flow
 1. `/start` command displays contract
 2. User accepts contract terms
-3. User shares phone number (Contact button or TEXT)
-4. Contract documents (TXT and PDF) automatically generated and sent (name auto-filled from Telegram profile)
-5. User selects payment method and uploads receipt photo
-6. Admin approves payment and assigns group(s)
-7. User receives one-time invite link(s) with expiration
+3. User enters course name (e.g., "A1 standard" or "A1 premium")
+4. User shares phone number (Contact button or TEXT)
+5. Contract documents (TXT and PDF) automatically generated and sent (name auto-filled from Telegram profile)
+6. User selects payment method and uploads receipt photo
+7. Admin approves payment and assigns group(s)
+8. User receives one-time invite link(s) with expiration
 
 ### Admin Commands
 - `/myid` - Shows user's Telegram ID
