@@ -424,8 +424,8 @@ def admin_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📊 Statistika")],
-            [KeyboardButton(text="✅ Tasdiqlangan to'lovlar")],
-            [KeyboardButton(text="⏳ Kutilayotgan to'lovlar")]
+            [KeyboardButton(text="✅ Tasdiqlangan to'lovlar"), KeyboardButton(text="⏳ Kutilayotgan to'lovlar")],
+            [KeyboardButton(text="🧹 Tozalash")]
         ],
         resize_keyboard=True,
         persistent=True
@@ -940,6 +940,36 @@ async def admin_pending_button(m: Message):
     except Exception as e:
         logger.error(f"Error in admin_pending_button: {e}")
         await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
+@dp.message(F.text == "🧹 Tozalash")
+async def admin_cleanup_button(m: Message):
+    """Admin chatni tozalash tugmasi."""
+    if not is_admin(m.from_user.id):
+        return
+    
+    try:
+        # Oxirgi 50 ta xabarni o'chirishga harakat qilamiz
+        current_msg_id = m.message_id
+        deleted_count = 0
+        
+        # Orqaga qarab 50 ta xabarni o'chiramiz
+        for i in range(1, 51):
+            try:
+                await bot.delete_message(m.from_user.id, current_msg_id - i)
+                deleted_count += 1
+            except Exception:
+                # Agar xabar topilmasa yoki o'chirib bo'lmasa, davom etamiz
+                pass
+        
+        # Natija xabarini yuboramiz va 3 sekunddan keyin o'chiramiz
+        result_msg = await m.answer(f"🧹 *Chat tozalandi!*\n\n✅ {deleted_count} ta xabar o'chirildi.", parse_mode="Markdown")
+        await asyncio.sleep(3)
+        await result_msg.delete()
+        await m.delete()  # Tozalash buyrug'ini ham o'chiramiz
+        
+    except Exception as e:
+        logger.error(f"Error in admin_cleanup_button: {e}")
+        await m.answer("Xatolik yuz berdi")
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
