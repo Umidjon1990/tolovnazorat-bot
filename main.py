@@ -512,15 +512,16 @@ async def cmd_stats(m: Message):
     now = int(datetime.utcnow().timestamp())
     try:
         async with db_pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM users")
-            active = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expires_at > $1", now)
-            expired = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expires_at <= $1 AND expires_at > 0", now)
+            # Faqat guruhdagi foydalanuvchilar
+            total = await conn.fetchval("SELECT COUNT(*) FROM users WHERE group_id IS NOT NULL")
+            active = await conn.fetchval("SELECT COUNT(*) FROM users WHERE group_id IS NOT NULL AND expires_at > $1", now)
+            expired = await conn.fetchval("SELECT COUNT(*) FROM users WHERE group_id IS NOT NULL AND expires_at <= $1 AND expires_at > 0", now)
     except Exception as e:
         return await m.answer(f"💾 DB xatosi: {e}")
     
     header = (
-        "📊 Statistika (umumiy)\n"
-        f"— Jami foydalanuvchi: {total}\n"
+        "📊 Statistika (faqat guruhdagilar)\n"
+        f"— Jami: {total}\n"
         f"— Aktiv: {active}\n"
         f"— Muddati tugagan: {expired}\n\n"
         "📚 Guruhlar kesimi:"
