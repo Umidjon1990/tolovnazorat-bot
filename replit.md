@@ -4,6 +4,12 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 
 # Recent Changes (October 13, 2025)
 
+## 🔥 **LATEST UPDATE - PROFILE NAME & CHAT LINK FIX**
+- **All Payment Messages**: Now use `fetch_user_profile()` to get fresh profile names from Telegram API (not database)
+- **Consistent Format**: Every payment message shows profile name (line 1) + clickable "chat" link (line 2)
+- **9 Message Types Fixed**: New payment, pending (2 variants), approved (3 variants), final summary (2 variants), rejected
+- **No More "0" Names**: Database may have old data, but messages always fetch fresh from Telegram
+
 ## 🚀 **TELEGRAM MINI APP ADDED**
 - **React Frontend**: Modern web UI built with React + Vite + Telegram WebApp SDK running on port 5000
 - **FastAPI Backend**: REST API server with endpoints for user registration, course selection, phone input, payment submission, and admin operations (port 8000)
