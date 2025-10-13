@@ -11,7 +11,8 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton, FSInputFile, BufferedInputFile
+    ReplyKeyboardMarkup, KeyboardButton, FSInputFile, BufferedInputFile,
+    WebAppInfo
 )
 from aiogram.filters import Command
 from dotenv import load_dotenv
@@ -55,6 +56,8 @@ REMIND_DAYS = int(os.getenv("REMIND_DAYS", "3"))
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable not found. Please set it in .env file")
+
+MINI_APP_URL = os.getenv("MINI_APP_URL", "")
 
 TZ_OFFSET = timedelta(hours=5)
 
@@ -486,8 +489,19 @@ async def cmd_start(m: Message):
             )
             return
         
-        # Oddiy foydalanuvchilar uchun shartnoma
-        await m.answer("📄 *ONLAYN O'QUV SHARTNOMA*\n\n" + CONTRACT_TEXT, reply_markup=contract_keyboard(), parse_mode="Markdown")
+        # Oddiy foydalanuvchilar uchun shartnoma va Mini App tugmasi
+        keyboard = contract_keyboard()
+        
+        # Agar Mini App URL o'rnatilgan bo'lsa, tugma qo'shamiz
+        if MINI_APP_URL:
+            webapp_button = InlineKeyboardButton(
+                text="📱 Ilovani ochish",
+                web_app=WebAppInfo(url=MINI_APP_URL)
+            )
+            # Mavjud tugmalar ustiga qo'shamiz
+            keyboard.inline_keyboard.insert(0, [webapp_button])
+        
+        await m.answer("📄 *ONLAYN O'QUV SHARTNOMA*\n\n" + CONTRACT_TEXT, reply_markup=keyboard, parse_mode="Markdown")
         uname, full = await fetch_user_profile(m.from_user.id)
         await upsert_user(m.from_user.id, uname, full, group_id=0, expires_at=0)
     except Exception as e:

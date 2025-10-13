@@ -45,11 +45,14 @@ BOT_TOKEN=your_bot_token_here
 ADMIN_IDS=your_telegram_id
 PRIVATE_GROUP_ID=-1001234567890
 DATABASE_URL=${{Postgres.DATABASE_URL}}
+MINI_APP_URL=https://your-frontend.up.railway.app
 SUBSCRIPTION_DAYS=30
 INVITE_LINK_EXPIRE_HOURS=72
 REMIND_DAYS=3
 SESSION_SECRET=any_random_string_here
 ```
+
+**MUHIM:** MINI_APP_URL'ni Frontend URL bilan almashtiring (Step 2 Service 3'dan)
 
 ---
 
