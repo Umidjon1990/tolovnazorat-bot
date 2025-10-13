@@ -494,11 +494,10 @@ async def cmd_start(m: Message):
 async def cb_terms_agree(c: CallbackQuery):
     try:
         await update_user_agreed(c.from_user.id, int(datetime.utcnow().timestamp()))
-        WAIT_CONTACT_FOR.add(c.from_user.id)
         await c.message.answer(
             "✅ Shartnoma tasdiqlandi.\n\n"
-            "📞 Telefon raqamingizni yuboring:",
-            reply_markup=contact_keyboard()
+            "📚 Qaysi kursni tanladingiz?",
+            reply_markup=course_selection_keyboard()
         )
         await c.answer()
     except Exception as e:
