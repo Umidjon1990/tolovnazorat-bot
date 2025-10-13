@@ -1001,7 +1001,8 @@ async def admin_pending_button(m: Message):
             if not user_row:
                 continue
             
-            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
+            # Telegram'dan profil nomini olish (har doim yangi)
+            _, full_name = await fetch_user_profile(uid)
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
             # Kurs nomini olish
@@ -1420,7 +1421,8 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             if not user_row:
                 continue
             
-            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
+            # Telegram'dan profil nomini olish (har doim yangi)
+            _, full_name = await fetch_user_profile(uid)
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
             # Kurs nomini olish
