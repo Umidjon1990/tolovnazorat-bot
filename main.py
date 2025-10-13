@@ -49,7 +49,7 @@ if not GROUP_IDS:
     logger.warning("PRIVATE_GROUP_ID is empty. Invite links cannot be created.")
 
 SUBSCRIPTION_DAYS = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
-INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "1"))
+INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "72"))  # 3 kun = 72 soat
 REMIND_DAYS = int(os.getenv("REMIND_DAYS", "3"))
 
 DB_PATH = os.getenv("DB_PATH", "./subs.db")
