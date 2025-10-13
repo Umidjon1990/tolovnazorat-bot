@@ -1008,17 +1008,17 @@ async def admin_pending_button(m: Message):
 
 @dp.message(F.text == "🧹 Tozalash")
 async def admin_cleanup_button(m: Message):
-    """Admin chatni tozalash tugmasi."""
+    """Admin chatni to'liq tozalash tugmasi."""
     if not is_admin(m.from_user.id):
         return
     
     try:
-        # Oxirgi 50 ta xabarni o'chirishga harakat qilamiz
+        # Oxirgi 300 ta xabarni o'chirishga harakat qilamiz (to'liq tozalash)
         current_msg_id = m.message_id
         deleted_count = 0
         
-        # Orqaga qarab 50 ta xabarni o'chiramiz
-        for i in range(1, 51):
+        # Orqaga qarab 300 ta xabarni o'chiramiz
+        for i in range(1, 301):
             try:
                 await bot.delete_message(m.from_user.id, current_msg_id - i)
                 deleted_count += 1
@@ -1028,7 +1028,7 @@ async def admin_cleanup_button(m: Message):
         
         # Natija xabarini yuboramiz va 3 sekunddan keyin o'chiramiz
         result_msg = await m.answer(
-            f"🧹 *Chat tozalandi!*\n\n✅ {deleted_count} ta xabar o'chirildi.", 
+            f"🧹 *Chat to'liq tozalandi!*\n\n✅ {deleted_count} ta xabar o'chirildi.", 
             parse_mode="Markdown"
         )
         await asyncio.sleep(3)
