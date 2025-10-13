@@ -189,107 +189,97 @@ async def get_payment(pid: int):
         return (row['id'], row['user_id'], row['status']) if row else None
 
 async def upsert_user(uid: int, username: str, full_name: str, group_id: int, expires_at: int, phone: Optional[str] = None, agreed_at: Optional[int] = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
             INSERT INTO users(user_id, username, full_name, group_id, expires_at, phone, agreed_at)
-            VALUES(?,?,?,?,?,?,?)
+            VALUES($1,$2,$3,$4,$5,$6,$7)
             ON CONFLICT(user_id) DO UPDATE SET
-                username=excluded.username,
-                full_name=excluded.full_name,
-                group_id=excluded.group_id,
-                expires_at=excluded.expires_at,
-                phone=COALESCE(excluded.phone, users.phone),
-                agreed_at=COALESCE(excluded.agreed_at, users.agreed_at)
-        """, (uid, username, full_name, group_id, expires_at, phone, agreed_at))
-        await db.commit()
+                username=EXCLUDED.username,
+                full_name=EXCLUDED.full_name,
+                group_id=EXCLUDED.group_id,
+                expires_at=EXCLUDED.expires_at,
+                phone=COALESCE(EXCLUDED.phone, users.phone),
+                agreed_at=COALESCE(EXCLUDED.agreed_at, users.agreed_at)
+        """, uid, username, full_name, group_id, expires_at, phone, agreed_at)
 
 async def update_user_expiry(uid: int, new_expires_at: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET expires_at=? WHERE user_id=?", (new_expires_at, uid))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET expires_at=$1 WHERE user_id=$2", new_expires_at, uid)
 
 async def update_user_phone(uid: int, phone: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET phone=? WHERE user_id=?", (phone, uid))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET phone=$1 WHERE user_id=$2", phone, uid)
 
 async def update_user_fullname(uid: int, full_name: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET full_name=? WHERE user_id=?", (full_name, uid))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET full_name=$1 WHERE user_id=$2", full_name, uid)
 
 async def update_user_agreed(uid: int, ts: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET agreed_at=? WHERE user_id=?", (ts, uid))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET agreed_at=$1 WHERE user_id=$2", ts, uid)
 
 async def clear_user_group(uid: int, gid: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET group_id=NULL WHERE user_id=? AND group_id=?", (uid, gid))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET group_id=NULL WHERE user_id=$1 AND group_id=$2", uid, gid)
 
 async def add_user_group(uid: int, gid: int, expires_at: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
             INSERT INTO user_groups(user_id, group_id, expires_at)
-            VALUES(?,?,?)
-            ON CONFLICT(user_id, group_id) DO UPDATE SET expires_at=excluded.expires_at
-        """, (uid, gid, expires_at))
-        await db.commit()
+            VALUES($1,$2,$3)
+            ON CONFLICT(user_id, group_id) DO UPDATE SET expires_at=EXCLUDED.expires_at
+        """, uid, gid, expires_at)
 
 async def clear_user_group_extra(uid: int, gid: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM user_groups WHERE user_id=? AND group_id=?", (uid, gid))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM user_groups WHERE user_id=$1 AND group_id=$2", uid, gid)
 
 async def get_user(uid: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT user_id, group_id, expires_at, username, full_name, phone, agreed_at FROM users WHERE user_id=?", (uid,))
-        return await cur.fetchone()
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT user_id, group_id, expires_at, username, full_name, phone, agreed_at FROM users WHERE user_id=$1", uid)
+        return (row['user_id'], row['group_id'], row['expires_at'], row['username'], row['full_name'], row['phone'], row['agreed_at']) if row else None
 
 async def all_members_of_group(gid: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT user_id, username, full_name, expires_at, phone FROM users WHERE group_id=?", (gid,))
-        u_rows = await cur.fetchall()
-        cur = await db.execute("""
+    async with db_pool.acquire() as conn:
+        u_rows = await conn.fetch("SELECT user_id, username, full_name, expires_at, phone FROM users WHERE group_id=$1", gid)
+        g_rows = await conn.fetch("""
             SELECT ug.user_id, u.username, u.full_name, ug.expires_at, u.phone
             FROM user_groups ug
             LEFT JOIN users u ON u.user_id = ug.user_id
-            WHERE ug.group_id=?
-        """, (gid,))
-        g_rows = await cur.fetchall()
+            WHERE ug.group_id=$1
+        """, gid)
     merged = {}
-    for r in u_rows + g_rows:
-        uid, username, full_name, exp, phone = r
+    for r in list(u_rows) + list(g_rows):
+        uid, username, full_name, exp, phone = r['user_id'], r['username'], r['full_name'], r['expires_at'], r['phone']
         if uid not in merged or (merged[uid][2] or 0) < (exp or 0):
             merged[uid] = (username, full_name, exp, phone)
     return [(uid, data[0], data[1], data[2], data[3]) for uid, data in merged.items()]
 
 async def expired_users():
     now = int(datetime.utcnow().timestamp())
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>0 AND expires_at<=?", (now,))
-        return await cur.fetchall()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>0 AND expires_at<=$1", now)
+        return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 async def expired_user_groups():
     now = int(datetime.utcnow().timestamp())
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>0 AND expires_at<=?", (now,))
-        return await cur.fetchall()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>0 AND expires_at<=$1", now)
+        return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 async def soon_expiring_users(days: int):
     now = int(datetime.utcnow().timestamp())
     upper = now + days * 86400
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>? AND expires_at<=?", (now, upper))
-        return await cur.fetchall()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>$1 AND expires_at<=$2", now, upper)
+        return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 async def soon_expiring_user_groups(days: int):
     now = int(datetime.utcnow().timestamp())
     upper = now + days * 86400
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>? AND expires_at<=?", (now, upper))
-        return await cur.fetchall()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>$1 AND expires_at<=$2", now, upper)
+        return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -521,15 +511,12 @@ async def cmd_stats(m: Message):
     
     now = int(datetime.utcnow().timestamp())
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cur = await db.execute("SELECT COUNT(*) FROM users")
-            total = (await cur.fetchone())[0]
-            cur = await db.execute("SELECT COUNT(*) FROM users WHERE expires_at > ?", (now,))
-            active = (await cur.fetchone())[0]
-            cur = await db.execute("SELECT COUNT(*) FROM users WHERE expires_at <= ? AND expires_at > 0", (now,))
-            expired = (await cur.fetchone())[0]
+        async with db_pool.acquire() as conn:
+            total = await conn.fetchval("SELECT COUNT(*) FROM users")
+            active = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expires_at > $1", now)
+            expired = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expires_at <= $1 AND expires_at > 0", now)
     except Exception as e:
-        return await m.answer(f"💾 DB xatosi: {e}\nDB_PATH: {DB_PATH}")
+        return await m.answer(f"💾 DB xatosi: {e}")
     
     header = (
         "📊 Statistika (umumiy)\n"
@@ -1231,7 +1218,12 @@ async def main():
     await db_init()
     asyncio.create_task(auto_kick_loop())
     logger.info("Bot is now polling for updates")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        if db_pool:
+            await db_pool.close()
+            logger.info("Database connection pool closed")
 
 if __name__ == "__main__":
     asyncio.run(main())
