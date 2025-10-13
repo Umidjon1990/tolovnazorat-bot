@@ -962,10 +962,21 @@ async def admin_cleanup_button(m: Message):
                 pass
         
         # Natija xabarini yuboramiz va 3 sekunddan keyin o'chiramiz
-        result_msg = await m.answer(f"🧹 *Chat tozalandi!*\n\n✅ {deleted_count} ta xabar o'chirildi.", parse_mode="Markdown")
+        result_msg = await m.answer(
+            f"🧹 *Chat tozalandi!*\n\n✅ {deleted_count} ta xabar o'chirildi.", 
+            parse_mode="Markdown"
+        )
         await asyncio.sleep(3)
         await result_msg.delete()
         await m.delete()  # Tozalash buyrug'ini ham o'chiramiz
+        
+        # Admin tugmalarini qayta yuborish
+        await bot.send_message(
+            m.from_user.id,
+            "👨‍💼 *ADMIN PANEL*",
+            reply_markup=admin_reply_keyboard(),
+            parse_mode="Markdown"
+        )
         
     except Exception as e:
         logger.error(f"Error in admin_cleanup_button: {e}")
