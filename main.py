@@ -852,7 +852,8 @@ async def cb_approved_last3(c: CallbackQuery):
             if not user_row:
                 continue
             
-            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
+            # Telegram'dan profil nomini olish (har doim yangi)
+            _, full_name = await fetch_user_profile(uid)
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -926,7 +927,8 @@ async def cb_approved_all(c: CallbackQuery):
             if not user_row:
                 continue
             
-            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
+            # Telegram'dan profil nomini olish (har doim yangi)
+            _, full_name = await fetch_user_profile(uid)
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -1197,8 +1199,8 @@ async def on_photo(m: Message):
             course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", m.from_user.id)
         course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
         
-        # Profil nomi va clickable chat link
-        full_name = m.from_user.full_name or "Anonim"
+        # Telegram'dan profil nomini olish (har doim yangi)
+        _, full_name = await fetch_user_profile(m.from_user.id)
         chat_link = f"[chat](tg://user?id={m.from_user.id})"
         
         kb = approve_keyboard(pid)
