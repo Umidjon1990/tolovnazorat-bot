@@ -1,8 +1,22 @@
 # Overview
 
-This is a Telegram bot application built using the aiogram framework (Python). The bot manages user interactions, admin functionality, and private group access through invite links for an online course subscription system. The application uses SQLite (via aiosqlite) for data persistence and is configured through environment variables for deployment flexibility.
+This is a Telegram Mini App + Bot system for managing online course subscriptions. The system combines a React-based Telegram Mini App (for user interactions) with a Python Telegram bot (for admin functions and automation). Users interact through a modern web interface while admins manage everything via Telegram bot commands. The system uses PostgreSQL for data persistence and FastAPI for the REST API backend.
 
 # Recent Changes (October 13, 2025)
+
+## 🚀 **TELEGRAM MINI APP ADDED**
+- **React Frontend**: Modern web UI built with React + Vite + Telegram WebApp SDK running on port 5000
+- **FastAPI Backend**: REST API server with endpoints for user registration, course selection, phone input, payment submission, and admin operations (port 8000)
+- **Dual System**: Mini App for users (beautiful UI) + Bot for admins (Telegram interface)
+- **Shared Database**: Both Mini App and Bot use the same PostgreSQL database
+- **Full Integration**: Users register via Mini App, admins approve via Bot, automation handled by Bot
+- **Architecture Files**: `MINI_APP_ARCHITECTURE.md` and `MINI_APP_SETUP.md` contain complete documentation
+- **Pages Created**: Contract, Courses (14 buttons), Phone input, Payment upload - all with Telegram SDK integration
+- **API Endpoints**: User endpoints (`/api/user/*`), Admin endpoints (`/api/admin/*`), Course endpoints (`/api/courses`)
+- **Authentication**: Telegram initData verification for secure access
+- **File Upload**: Payment receipts uploaded to `/uploads/` folder
+
+## Previous Bot-Only Updates
 
 - **Button-Based Course Selection**: After contract acceptance, users see 14 course buttons (A0-B2, CEFR PRO, Grammatika - Standard/Premium variants) in 2-column layout. Selected course saves to database automatically.
 - **Streamlined User Flow**: Contract → Course Selection (buttons) → Phone → Payment - clean and intuitive
