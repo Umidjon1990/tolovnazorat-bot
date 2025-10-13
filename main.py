@@ -512,14 +512,19 @@ async def cmd_stats(m: Message):
         return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
     
     now = int(datetime.utcnow().timestamp())
-    try:
-        async with db_pool.acquire() as conn:
-            # Faqat guruhdagi foydalanuvchilar
-            total = await conn.fetchval("SELECT COUNT(*) FROM users WHERE group_id IS NOT NULL")
-            active = await conn.fetchval("SELECT COUNT(*) FROM users WHERE group_id IS NOT NULL AND expires_at > $1", now)
-            expired = await conn.fetchval("SELECT COUNT(*) FROM users WHERE group_id IS NOT NULL AND expires_at <= $1 AND expires_at > 0", now)
-    except Exception as e:
-        return await m.answer(f"💾 DB xatosi: {e}")
+    
+    # Barcha guruhlardagi unique userlarni yig'amiz
+    all_users = {}
+    for gid in GROUP_IDS:
+        members = await all_members_of_group(gid)
+        for uid, username, full_name, exp, phone in members:
+            if uid not in all_users or (all_users[uid] or 0) < (exp or 0):
+                all_users[uid] = exp
+    
+    # Statistika hisoblash
+    total = len(all_users)
+    active = sum(1 for exp in all_users.values() if exp and exp > now)
+    expired = sum(1 for exp in all_users.values() if exp and 0 < exp <= now)
     
     header = (
         "📊 Statistika (faqat guruhdagilar)\n"
