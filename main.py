@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-import aiosqlite
+import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery,
@@ -52,11 +52,17 @@ SUBSCRIPTION_DAYS = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
 INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "72"))  # 3 kun = 72 soat
 REMIND_DAYS = int(os.getenv("REMIND_DAYS", "3"))
 
-DB_PATH = os.getenv("DB_PATH", "./subs.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable not found. Please set it in .env file")
+
 TZ_OFFSET = timedelta(hours=5)
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
+
+# PostgreSQL connection pool
+db_pool: Optional[asyncpg.Pool] = None
 
 WAIT_DATE_FOR: dict[int, int] = {}
 MULTI_PICK: dict[int, dict] = {}
@@ -123,26 +129,26 @@ Quyidagi "Tasdiqlayman" tugmasini bosish orqali O'quvchi shartlar bilan tanishga
 
 CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS users(
-    user_id INTEGER PRIMARY KEY,
+    user_id BIGINT PRIMARY KEY,
     username TEXT,
     full_name TEXT,
-    group_id INTEGER,
-    expires_at INTEGER DEFAULT 0,
+    group_id BIGINT,
+    expires_at BIGINT DEFAULT 0,
     phone TEXT,
-    agreed_at INTEGER
+    agreed_at BIGINT
 );
 CREATE TABLE IF NOT EXISTS payments(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT,
     photo_file TEXT,
     status TEXT,
-    created_at INTEGER,
-    admin_id INTEGER
+    created_at BIGINT,
+    admin_id BIGINT
 );
 CREATE TABLE IF NOT EXISTS user_groups(
-    user_id INTEGER,
-    group_id INTEGER,
-    expires_at INTEGER,
+    user_id BIGINT,
+    group_id BIGINT,
+    expires_at BIGINT,
     PRIMARY KEY (user_id, group_id)
 );
 CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_id);
@@ -154,52 +160,33 @@ CREATE INDEX IF NOT EXISTS idx_ug_group ON user_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_ug_expires ON user_groups(expires_at);
 """
 
-def _ensure_db_dir():
-    d = os.path.dirname(DB_PATH)
-    if d and not os.path.exists(d):
-        try:
-            os.makedirs(d, exist_ok=True)
-            logger.info(f"Created database directory: {d}")
-        except Exception as e:
-            logger.warning(f"Failed to create database directory: {e}")
-
 async def db_init():
-    _ensure_db_dir()
+    global db_pool
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.executescript(CREATE_SQL)
-            cur = await db.execute("PRAGMA table_info(users)")
-            cols = [r[1] for r in await cur.fetchall()]
-            if "phone" not in cols:
-                await db.execute("ALTER TABLE users ADD COLUMN phone TEXT;")
-            if "agreed_at" not in cols:
-                await db.execute("ALTER TABLE users ADD COLUMN agreed_at INTEGER;")
-            await db.commit()
-        logger.info(f"Database initialized successfully at {DB_PATH}")
+        db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+        async with db_pool.acquire() as conn:
+            await conn.execute(CREATE_SQL)
+        logger.info("PostgreSQL database initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
 
 async def add_payment(user: Message, file_id: str) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO payments(user_id, photo_file, status, created_at) VALUES(?,?,?,?)",
-            (user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp()))
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO payments(user_id, photo_file, status, created_at) VALUES($1,$2,$3,$4) RETURNING id",
+            user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp())
         )
-        await db.commit()
-        cur = await db.execute("SELECT last_insert_rowid()")
-        row = await cur.fetchone()
-        return int(row[0])
+        return int(row['id'])
 
 async def set_payment_status(pid: int, status: str, admin_id: Optional[int]):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE payments SET status=?, admin_id=? WHERE id=?", (status, admin_id, pid))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE payments SET status=$1, admin_id=$2 WHERE id=$3", status, admin_id, pid)
 
 async def get_payment(pid: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT id, user_id, status FROM payments WHERE id=?", (pid,))
-        return await cur.fetchone()
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT id, user_id, status FROM payments WHERE id=$1", pid)
+        return (row['id'], row['user_id'], row['status']) if row else None
 
 async def upsert_user(uid: int, username: str, full_name: str, group_id: int, expires_at: int, phone: Optional[str] = None, agreed_at: Optional[int] = None):
     async with aiosqlite.connect(DB_PATH) as db:
