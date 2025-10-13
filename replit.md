@@ -4,8 +4,8 @@ This is a Telegram bot application built using the aiogram framework (Python). T
 
 # Recent Changes (October 13, 2025)
 
-- **Caption-Based Course Tracking**: Users write course name (e.g., "A1 standard", "A1 premium") in photo caption when uploading payment receipt. Bot reads caption and saves to database automatically. User instructions added to payment buttons.
-- **Simplified User Flow**: Removed text-based course input handlers - now uses caption approach which is simpler and less error-prone
+- **Button-Based Course Selection**: After contract acceptance, users see 14 course buttons (A0-B2, CEFR PRO, Grammatika - Standard/Premium variants) in 2-column layout. Selected course saves to database automatically.
+- **Streamlined User Flow**: Contract → Course Selection (buttons) → Phone → Payment - clean and intuitive
 - **Auto-Migration System**: Database migration runs on startup - `course_name` column created if missing
 - **Admin Button Interface**: Persistent reply keyboard for admins - "📊 Statistika", "✅ Tasdiqlangan to'lovlar", "⏳ Kutilayotgan to'lovlar", and "🧹 Tozalash" buttons always visible (no need to press /start)
 - **Chat Cleanup Feature**: New "🧹 Tozalash" button deletes last 50 bot messages from admin chat, shows confirmation for 3 seconds, restores admin panel automatically
