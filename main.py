@@ -1182,10 +1182,15 @@ async def on_photo(m: Message):
             course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", m.from_user.id)
         course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
         
+        # Username va clickable link
+        username = f"@{m.from_user.username}" if m.from_user.username else "Username yo'q"
+        user_link = f"[{m.from_user.full_name}](tg://user?id={m.from_user.id})"
+        
         kb = approve_keyboard(pid)
         caption = (
             f"🧾 *Yangi to'lov cheki*\n\n"
-            f"👤 Ism: {m.from_user.full_name}\n"
+            f"👤 Ism: {user_link}\n"
+            f"📧 Username: {username}\n"
             f"📱 Telefon: {phone}\n"
             f"📚 Kurs: {course_name}\n"
             f"🆔 ID: `{m.from_user.id}`\n"
@@ -1595,7 +1600,8 @@ async def cb_ms_confirm(c: CallbackQuery):
             group_names = ", ".join([titles.get(g, str(g)) for g in selected])
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-            username_str = f"@{username}" if username else "username yo'q"
+            username_str = f"@{username}" if username else "Username yo'q"
+            user_link = f"[{full_name}](tg://user?id={user_id})"
             
             # Kurs nomini olish
             async with db_pool.acquire() as conn:
@@ -1604,8 +1610,8 @@ async def cb_ms_confirm(c: CallbackQuery):
             
             final_caption = (
                 f"✅ *HAVOLALAR YUBORILDI*\n\n"
-                f"👤 {full_name}\n"
-                f"📱 {username_str}\n"
+                f"👤 Ism: {user_link}\n"
+                f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruhlar: {group_names}\n"
@@ -1696,7 +1702,8 @@ async def cb_pick_group(c: CallbackQuery):
         try:
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-            username_str = f"@{username}" if username else "username yo'q"
+            username_str = f"@{username}" if username else "Username yo'q"
+            user_link = f"[{full_name}](tg://user?id={user_id})"
             
             # Kurs nomini olish
             async with db_pool.acquire() as conn:
@@ -1705,8 +1712,8 @@ async def cb_pick_group(c: CallbackQuery):
             
             final_caption = (
                 f"✅ *HAVOLA YUBORILDI*\n\n"
-                f"👤 {full_name}\n"
-                f"📱 {username_str}\n"
+                f"👤 Ism: {user_link}\n"
+                f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruh: {group_name}\n"
