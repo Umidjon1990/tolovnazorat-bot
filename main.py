@@ -880,12 +880,11 @@ async def cb_approved_last3(c: CallbackQuery):
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            username_str = f"@{username}" if username else "Username yo'q"
-            user_link = f"[{full_name}](tg://user?id={uid})"
+            chat_link = f"[chat](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 {user_link}\n"
-                f"📧 Username: {username_str}\n"
+                f"👤 {full_name}\n"
+                f"📧 {chat_link}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
@@ -956,12 +955,11 @@ async def cb_approved_all(c: CallbackQuery):
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            username_str = f"@{username}" if username else "Username yo'q"
-            user_link = f"[{full_name}](tg://user?id={uid})"
+            chat_link = f"[chat](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 {user_link}\n"
-                f"📧 Username: {username_str}\n"
+                f"👤 {full_name}\n"
+                f"📧 {chat_link}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
@@ -1023,12 +1021,11 @@ async def admin_pending_button(m: Message):
             contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
-            username_str = f"@{username}" if username else "Username yo'q"
-            user_link = f"[{full_name}](tg://user?id={uid})"
+            chat_link = f"[chat](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
-                f"👤 {user_link}\n"
-                f"📧 Username: {username_str}\n"
+                f"👤 {full_name}\n"
+                f"📧 {chat_link}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"📄 Shartnoma: {contract_date}\n"
@@ -1203,15 +1200,15 @@ async def on_photo(m: Message):
             course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", m.from_user.id)
         course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
         
-        # Username va clickable link
-        username = f"@{m.from_user.username}" if m.from_user.username else "Username yo'q"
-        user_link = f"[{m.from_user.full_name}](tg://user?id={m.from_user.id})"
+        # Profil nomi va clickable chat link
+        full_name = m.from_user.full_name or "Anonim"
+        chat_link = f"[chat](tg://user?id={m.from_user.id})"
         
         kb = approve_keyboard(pid)
         caption = (
             f"🧾 *Yangi to'lov cheki*\n\n"
-            f"👤 {user_link}\n"
-            f"📧 Username: {username}\n"
+            f"👤 {full_name}\n"
+            f"📧 {chat_link}\n"
             f"📱 Telefon: {phone}\n"
             f"📚 Kurs: {course_name}\n"
             f"🆔 ID: `{m.from_user.id}`\n"
@@ -1377,12 +1374,11 @@ async def cb_admin_payments_approved(c: CallbackQuery):
             # To'lov sanasi
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            username_str = f"@{username}" if username else "Username yo'q"
-            user_link = f"[{full_name}](tg://user?id={uid})"
+            chat_link = f"[chat](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 {user_link}\n"
-                f"📧 Username: {username_str}\n"
+                f"👤 {full_name}\n"
+                f"📧 {chat_link}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruh: {group_name}\n"
@@ -1446,12 +1442,11 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
-            username_str = f"@{username}" if username else "Username yo'q"
-            user_link = f"[{full_name}](tg://user?id={uid})"
+            chat_link = f"[chat](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
-                f"👤 {user_link}\n"
-                f"📧 Username: {username_str}\n"
+                f"👤 {full_name}\n"
+                f"📧 {chat_link}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"📄 Shartnoma: {contract_date}\n"
@@ -1635,8 +1630,7 @@ async def cb_ms_confirm(c: CallbackQuery):
             group_names = ", ".join([titles.get(g, str(g)) for g in selected])
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-            username_str = f"@{username}" if username else "Username yo'q"
-            user_link = f"[{full_name}](tg://user?id={user_id})"
+            chat_link = f"[chat](tg://user?id={user_id})"
             
             # Kurs nomini olish
             async with db_pool.acquire() as conn:
@@ -1645,8 +1639,8 @@ async def cb_ms_confirm(c: CallbackQuery):
             
             final_caption = (
                 f"✅ *HAVOLALAR YUBORILDI*\n\n"
-                f"👤 {user_link}\n"
-                f"📧 Username: {username_str}\n"
+                f"👤 {full_name}\n"
+                f"📧 {chat_link}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruhlar: {group_names}\n"
@@ -1737,8 +1731,7 @@ async def cb_pick_group(c: CallbackQuery):
         try:
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-            username_str = f"@{username}" if username else "Username yo'q"
-            user_link = f"[{full_name}](tg://user?id={user_id})"
+            chat_link = f"[chat](tg://user?id={user_id})"
             
             # Kurs nomini olish
             async with db_pool.acquire() as conn:
@@ -1747,8 +1740,8 @@ async def cb_pick_group(c: CallbackQuery):
             
             final_caption = (
                 f"✅ *HAVOLA YUBORILDI*\n\n"
-                f"👤 {user_link}\n"
-                f"📧 Username: {username_str}\n"
+                f"👤 {full_name}\n"
+                f"📧 {chat_link}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruh: {group_name}\n"
