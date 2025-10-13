@@ -686,14 +686,8 @@ async def on_admin_date_handler(m: Message):
                 except Exception as e:
                     logger.error(f"Failed to send contract documents to user: {e}")
                 
-                for aid in ADMIN_IDS:
-                    try:
-                        await bot.send_document(aid, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
-                        if pdf_buf:
-                            await bot.send_document(aid, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
-                        logger.info(f"Contract documents sent to admin {aid}")
-                    except Exception as e:
-                        logger.error(f"Failed to send contract documents to admin {aid}: {e}")
+                # Shartnoma admin'ga yuborilmaydi (faqat to'lov cheki yetarli)
+                logger.info(f"Contract generated for user {m.from_user.id}, not sent to admins")
                 
                 await m.answer("✅ Telefon raqam qabul qilindi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
             except Exception as e:
@@ -732,14 +726,8 @@ async def on_contact(m: Message):
         except Exception as e:
             logger.error(f"Failed to send contract documents to user: {e}")
         
-        for aid in ADMIN_IDS:
-            try:
-                await bot.send_document(aid, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"), caption=f"🆕 Shartnoma — ID: {m.from_user.id}")
-                if pdf_buf:
-                    await bot.send_document(aid, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
-                logger.info(f"Contract documents sent to admin {aid}")
-            except Exception as e:
-                logger.error(f"Failed to send contract documents to admin {aid}: {e}")
+        # Shartnoma admin'ga yuborilmaydi (faqat to'lov cheki yetarli)
+        logger.info(f"Contract generated for user {m.from_user.id}, not sent to admins")
         
         await m.answer("✅ Telefon raqam qabul qilindi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
     except Exception as e:
@@ -767,16 +755,24 @@ async def on_photo(m: Message):
     try:
         pid = await add_payment(m, m.photo[-1].file_id)
         await m.answer("✅ Chekingiz qabul qilindi. Admin tekshiradi.")
+        
+        # User ma'lumotlarini olish
+        user_row = await get_user(m.from_user.id)
+        phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+        
         kb = approve_keyboard(pid)
         caption = (
-            f"🧾 Yangi to'lov cheki\n"
-            f"{m.from_user.full_name} (@{m.from_user.username or 'no_username'})\n"
-            f"ID: {m.from_user.id}\n"
-            f"Payment ID: {pid}"
+            f"🧾 *Yangi to'lov cheki*\n\n"
+            f"👤 Ism: {m.from_user.full_name}\n"
+            f"📱 Telefon: {phone}\n"
+            f"🆔 ID: `{m.from_user.id}`\n"
+            f"💳 Payment ID: `{pid}`\n"
+            f"📅 Vaqt: {(datetime.utcnow() + TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}"
         )
+        
         for aid in ADMIN_IDS:
             try:
-                await bot.send_photo(aid, m.photo[-1].file_id, caption=caption, reply_markup=kb)
+                await bot.send_photo(aid, m.photo[-1].file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
             except Exception as e:
                 logger.warning(f"Failed to send payment notification to admin {aid}: {e}")
     except Exception as e:
@@ -936,6 +932,8 @@ async def cb_ms_confirm(c: CallbackQuery):
             except Exception as e:
                 links_out.append(f"• {titles.get(g, g)}: link yaratishda xato ({e})")
         human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        
+        # User'ga linklar yuborish
         try:
             await bot.send_message(
                 user_id,
@@ -946,9 +944,26 @@ async def cb_ms_confirm(c: CallbackQuery):
             )
         except Exception as e:
             logger.warning(f"Failed to send approval message to user {user_id}: {e}")
-        await c.message.answer("✅ Tanlangan guruhlarga havolalar yuborildi. (Birinchisi asosiy guruh sifatida saqlandi)")
+        
+        # Admin chek xabarini yangilash (edit qilish)
+        try:
+            group_names = ", ".join([titles.get(g, str(g)) for g in selected])
+            user_row = await get_user(user_id)
+            phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+            
+            new_caption = (
+                f"✅ *TASDIQLANDI*\n\n"
+                f"👤 {full_name}\n"
+                f"📱 Telefon: {phone}\n"
+                f"🏫 Guruhlar: {group_names}\n"
+                f"⏳ Tugash: {human_exp}"
+            )
+            await c.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Failed to edit admin message: {e}")
+        
         MULTI_PICK.pop(c.from_user.id, None)
-        await c.answer()
+        await c.answer("✅ Tanlangan guruhlarga havolalar yuborildi")
     except Exception as e:
         logger.error(f"Error in cb_ms_confirm: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
@@ -980,12 +995,20 @@ async def cb_pick_group(c: CallbackQuery):
         username, full_name = await fetch_user_profile(user_id)
         await upsert_user(uid=user_id, username=username, full_name=full_name, group_id=gid, expires_at=expires_at)
         await set_payment_status(pid, "approved", c.from_user.id)
+        
+        # Guruh nomini olish
+        titles = dict(await resolve_group_titles())
+        group_name = titles.get(gid, str(gid))
+        
         try:
             link = await send_one_time_link(gid, user_id)
         except Exception as e:
             await c.message.answer(f"Link yaratishda xato: {e}")
             return await c.answer()
+        
         human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        
+        # User'ga link yuborish
         try:
             await bot.send_message(
                 user_id,
@@ -995,8 +1018,24 @@ async def cb_pick_group(c: CallbackQuery):
             )
         except Exception as e:
             logger.warning(f"Failed to send approval message to user {user_id}: {e}")
-        await c.message.answer("✅ Tasdiqlandi va havola yuborildi.")
-        await c.answer()
+        
+        # Admin chek xabarini yangilash (edit qilish)
+        try:
+            user_row = await get_user(user_id)
+            phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+            
+            new_caption = (
+                f"✅ *TASDIQLANDI*\n\n"
+                f"👤 {full_name}\n"
+                f"📱 Telefon: {phone}\n"
+                f"🏫 Guruh: {group_name}\n"
+                f"⏳ Tugash: {human_exp}"
+            )
+            await c.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Failed to edit admin message: {e}")
+        
+        await c.answer("✅ Tasdiqlandi va havola yuborildi")
     except Exception as e:
         logger.error(f"Error in cb_pick_group: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
@@ -1007,9 +1046,29 @@ async def cb_reject(c: CallbackQuery):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         pid = int(c.data.split(":")[1])
-        await set_payment_status(pid, "rejected", c.from_user.id)
-        await c.message.answer("❌ To'lov rad etildi.")
-        await c.answer()
+        row = await get_payment(pid)
+        if row:
+            _pid, user_id, _status = row
+            user_row = await get_user(user_id)
+            username, full_name = await fetch_user_profile(user_id)
+            phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+            
+            await set_payment_status(pid, "rejected", c.from_user.id)
+            
+            # Admin chek xabarini yangilash
+            try:
+                new_caption = (
+                    f"❌ *RAD ETILDI*\n\n"
+                    f"👤 {full_name}\n"
+                    f"📱 Telefon: {phone}"
+                )
+                await c.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"Failed to edit admin message: {e}")
+            
+            await c.answer("❌ To'lov rad etildi")
+        else:
+            await c.answer("Payment topilmadi", show_alert=True)
     except Exception as e:
         logger.error(f"Error in cb_reject: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
