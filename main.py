@@ -879,7 +879,7 @@ async def cb_approved_last3(c: CallbackQuery):
             user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 Ism: {user_link}\n"
+                f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
@@ -949,7 +949,7 @@ async def cb_approved_all(c: CallbackQuery):
             user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 Ism: {user_link}\n"
+                f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
@@ -1010,7 +1010,7 @@ async def admin_pending_button(m: Message):
             user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
-                f"👤 Ism: {user_link}\n"
+                f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📄 Shartnoma: {contract_date}\n"
@@ -1192,7 +1192,7 @@ async def on_photo(m: Message):
         kb = approve_keyboard(pid)
         caption = (
             f"🧾 *Yangi to'lov cheki*\n\n"
-            f"👤 Ism: {user_link}\n"
+            f"👤 {user_link}\n"
             f"📧 Username: {username}\n"
             f"📱 Telefon: {phone}\n"
             f"📚 Kurs: {course_name}\n"
@@ -1358,7 +1358,7 @@ async def cb_admin_payments_approved(c: CallbackQuery):
             user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 Ism: {user_link}\n"
+                f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"🏫 Guruh: {group_name}\n"
@@ -1421,7 +1421,7 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
-                f"👤 Ism: {user_link}\n"
+                f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📄 Shartnoma: {contract_date}\n"
@@ -1615,7 +1615,7 @@ async def cb_ms_confirm(c: CallbackQuery):
             
             final_caption = (
                 f"✅ *HAVOLALAR YUBORILDI*\n\n"
-                f"👤 Ism: {user_link}\n"
+                f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
@@ -1717,7 +1717,7 @@ async def cb_pick_group(c: CallbackQuery):
             
             final_caption = (
                 f"✅ *HAVOLA YUBORILDI*\n\n"
-                f"👤 Ism: {user_link}\n"
+                f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"📚 Kurs: {course_name}\n"
