@@ -853,7 +853,7 @@ async def cb_approved_last3(c: CallbackQuery):
                 continue
             
             username = user_row[1] if len(user_row) > 1 else None
-            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -923,7 +923,7 @@ async def cb_approved_all(c: CallbackQuery):
                 continue
             
             username = user_row[1] if len(user_row) > 1 else None
-            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -992,7 +992,7 @@ async def admin_pending_button(m: Message):
                 continue
             
             username = user_row[1] if len(user_row) > 1 else None
-            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
             # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
@@ -1340,7 +1340,7 @@ async def cb_admin_payments_approved(c: CallbackQuery):
                 continue
             
             username = user_row[1] if len(user_row) > 1 else None
-            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -1354,11 +1354,12 @@ async def cb_admin_payments_approved(c: CallbackQuery):
             # To'lov sanasi
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            username_str = f"@{username}" if username else "yo'q"
+            username_str = f"@{username}" if username else "Username yo'q"
+            user_link = f"[{full_name}](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
-                f"👤 Ism: {full_name}\n"
-                f"📱 Username: {username_str}\n"
+                f"👤 Ism: {user_link}\n"
+                f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
                 f"🏫 Guruh: {group_name}\n"
                 f"⏳ Obuna tugashi: {expiry_date}\n"
@@ -1402,7 +1403,7 @@ async def cb_admin_payments_pending(c: CallbackQuery):
                 continue
             
             username = user_row[1] if len(user_row) > 1 else None
-            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
             # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
