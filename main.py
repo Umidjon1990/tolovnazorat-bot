@@ -852,7 +852,6 @@ async def cb_approved_last3(c: CallbackQuery):
             if not user_row:
                 continue
             
-            username = user_row[1] if len(user_row) > 1 else None
             full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
@@ -927,7 +926,6 @@ async def cb_approved_all(c: CallbackQuery):
             if not user_row:
                 continue
             
-            username = user_row[1] if len(user_row) > 1 else None
             full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
@@ -1001,7 +999,6 @@ async def admin_pending_button(m: Message):
             if not user_row:
                 continue
             
-            username = user_row[1] if len(user_row) > 1 else None
             full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
@@ -1354,7 +1351,6 @@ async def cb_admin_payments_approved(c: CallbackQuery):
             if not user_row:
                 continue
             
-            username = user_row[1] if len(user_row) > 1 else None
             full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
@@ -1422,7 +1418,6 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             if not user_row:
                 continue
             
-            username = user_row[1] if len(user_row) > 1 else None
             full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
@@ -1783,9 +1778,11 @@ async def cb_reject(c: CallbackQuery):
             
             # Admin chek xabarini yangilash
             try:
+                chat_link = f"[chat](tg://user?id={user_id})"
                 new_caption = (
                     f"❌ *RAD ETILDI*\n\n"
                     f"👤 {full_name}\n"
+                    f"📧 {chat_link}\n"
                     f"📱 Telefon: {phone}"
                 )
                 await c.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
