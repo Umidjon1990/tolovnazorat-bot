@@ -29,24 +29,25 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - State management for multi-step workflows (date input, contact collection, fullname entry)
 
 ## Data Storage
-- **Database**: SQLite with aiosqlite (async wrapper)
-- **Rationale**: Lightweight, serverless database suitable for small to medium-scale bot applications with minimal infrastructure requirements
-- **Design**: Fully asynchronous database operations to prevent blocking the event loop
+- **Database**: PostgreSQL with asyncpg (async driver)
+- **Rationale**: Production-ready relational database with ACID compliance, perfect for Railway deployment with persistent volumes
+- **Design**: Connection pooling (2-10 connections) for optimal performance and fully asynchronous operations
 - **Tables**:
   - `users`: Core user information with subscription details
   - `payments`: Payment records with approval status
   - `user_groups`: Many-to-many relationship for multi-group access
+- **Migration**: Migrated from SQLite to PostgreSQL (October 13, 2025) for Railway deployment stability
 
 ## Configuration Management
 - **Approach**: Environment variables loaded via python-dotenv
 - **Key Settings**:
   - `BOT_TOKEN`: Telegram bot authentication token (required)
+  - `DATABASE_URL`: PostgreSQL connection string (required)
   - `ADMIN_IDS`: Comma-separated list of Telegram user IDs with admin privileges
   - `PRIVATE_GROUP_ID`: Comma-separated list of private group IDs for invite link generation
   - `SUBSCRIPTION_DAYS`: Default subscription duration (default: 30 days)
-  - `INVITE_LINK_EXPIRE_HOURS`: Invite link expiration time (default: 1 hour)
+  - `INVITE_LINK_EXPIRE_HOURS`: Invite link expiration time (default: 72 hours)
   - `REMIND_DAYS`: Days before expiry to send reminder (default: 3 days)
-  - `DB_PATH`: Database file location (default: ./subs.db)
 - **Validation**: Startup checks ensure critical configuration is present, with warnings for optional settings
 
 ## Access Control
@@ -110,13 +111,13 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 
 ## Python Libraries
 - **aiogram**: Telegram Bot API framework (async)
-- **aiosqlite**: Asynchronous SQLite database adapter
+- **asyncpg**: Asynchronous PostgreSQL database driver with connection pooling
 - **python-dotenv**: Environment variable management
 - **reportlab**: PDF generation for contracts
 - **Standard library**: asyncio, logging, datetime, typing, io, re for core functionality
 
 ## Database
-- **SQLite**: Local file-based relational database
-- **Access Pattern**: Single-connection async operations with proper indexing
+- **PostgreSQL**: Production-grade relational database with ACID compliance
+- **Access Pattern**: Connection pool (2-10 connections) with async operations and proper indexing
 - **Schema**: Supports user management, payment tracking, and multi-group memberships
-- **Note**: Suitable for current scale; may migrate to PostgreSQL for larger deployments
+- **Deployment**: Persistent PostgreSQL volumes on Railway ensure data survives redeploys and republishes
