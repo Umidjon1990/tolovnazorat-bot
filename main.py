@@ -720,12 +720,10 @@ async def admin_stats_button(m: Message):
             continue
         
         lines = [f"🏷 {title} — {len(real_members)} a'zo"]
-        now_loc_date = (datetime.utcnow() + TZ_OFFSET).date()
         MAX_SHOW = 40
         users_sorted = sorted(real_members, key=lambda r: (r[3] or 0), reverse=True)
         for i, (uid, username, full_name, exp, phone) in enumerate(users_sorted[:MAX_SHOW], start=1):
-            exp_dt = (datetime.utcfromtimestamp(exp) + TZ_OFFSET).date() if exp else None
-            left_str = human_left(exp_dt, now_loc_date) if exp_dt else "—"
+            left_str, _ = human_left(exp) if exp else ("—", 0)
             lines.append(f"{i}. {full_name or 'Nomsiz'} — {left_str}")
         
         if len(real_members) > MAX_SHOW:
@@ -918,7 +916,13 @@ async def admin_pending_button(m: Message):
             
             # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
             agreed_at = user_row[4] if len(user_row) > 4 else None
-            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at else "yo'q"
+            # agreed_at ni int ga convert qilamiz (agar str bo'lsa)
+            if agreed_at and isinstance(agreed_at, str):
+                try:
+                    agreed_at = int(agreed_at)
+                except ValueError:
+                    agreed_at = None
+            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
             username_str = f"@{username}" if username else "yo'q"
@@ -1157,12 +1161,10 @@ async def cb_admin_stats(c: CallbackQuery):
             continue
         
         lines = [f"🏷 {title} — {len(real_members)} a'zo"]
-        now_loc_date = (datetime.utcnow() + TZ_OFFSET).date()
         MAX_SHOW = 40
         users_sorted = sorted(real_members, key=lambda r: (r[3] or 0), reverse=True)
         for i, (uid, username, full_name, exp, phone) in enumerate(users_sorted[:MAX_SHOW], start=1):
-            exp_dt = (datetime.utcfromtimestamp(exp) + TZ_OFFSET).date() if exp else None
-            left_str = human_left(exp_dt, now_loc_date) if exp_dt else "—"
+            left_str, _ = human_left(exp) if exp else ("—", 0)
             lines.append(f"{i}. {full_name or 'Nomsiz'} — {left_str}")
         
         if len(real_members) > MAX_SHOW:
@@ -1271,7 +1273,13 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             
             # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
             agreed_at = user_row[4] if len(user_row) > 4 else None
-            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at else "yo'q"
+            # agreed_at ni int ga convert qilamiz (agar str bo'lsa)
+            if agreed_at and isinstance(agreed_at, str):
+                try:
+                    agreed_at = int(agreed_at)
+                except ValueError:
+                    agreed_at = None
+            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
             username_str = f"@{username}" if username else "yo'q"
