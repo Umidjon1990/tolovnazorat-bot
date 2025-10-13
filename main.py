@@ -538,24 +538,26 @@ async def cmd_stats(m: Message):
     titles = dict(await resolve_group_titles())
     for gid in GROUP_IDS:
         users = await all_members_of_group(gid)
+        # Faqat aktiv obunali foydalanuvchilarni qoldirish
+        active_users = [(uid, username, full_name, exp, phone) 
+                        for uid, username, full_name, exp, phone in users 
+                        if exp and exp > now]
+        
         title = titles.get(gid, str(gid))
-        if not users:
+        if not active_users:
             await m.answer(f"🏷 {title} — 0 a'zo")
             continue
         
-        lines = [f"🏷 {title} — {len(users)} a'zo"]
+        lines = [f"🏷 {title} — {len(active_users)} a'zo"]
         now_loc_date = (datetime.utcnow() + TZ_OFFSET).date()
         MAX_SHOW = 40
-        users_sorted = sorted(users, key=lambda r: (r[3] or 0), reverse=True)
+        users_sorted = sorted(active_users, key=lambda r: (r[3] or 0), reverse=True)
         for i, (uid, username, full_name, exp, phone) in enumerate(users_sorted[:MAX_SHOW], start=1):
             tag = f"@{username}" if username else (full_name or uid)
             phone_s = f" 📞 {phone}" if phone else ""
-            if exp and exp > 0:
-                exp_str, left = human_left(exp)
-                state = "✅" if (datetime.utcfromtimestamp(exp) + TZ_OFFSET).date() >= now_loc_date else "⚠️"
-                lines.append(f"{i}. {tag}{phone_s} — {state} {exp_str} (qoldi: {max(left,0)} kun)")
-            else:
-                lines.append(f"{i}. {tag}{phone_s} — muddat belgilanmagan")
+            exp_str, left = human_left(exp)
+            state = "✅" if (datetime.utcfromtimestamp(exp) + TZ_OFFSET).date() >= now_loc_date else "⚠️"
+            lines.append(f"{i}. {tag}{phone_s} — {state} {exp_str} (qoldi: {max(left,0)} kun)")
         if len(users_sorted) > MAX_SHOW:
             lines.append(f"... va yana {len(users_sorted)-MAX_SHOW} ta")
         
