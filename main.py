@@ -941,10 +941,11 @@ async def cb_ms_confirm(c: CallbackQuery):
         
         # User'ga linklar yuborish
         try:
+            link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
                 "✅ To'lov tasdiqlandi!\n"
-                f"Quyidagi guruhlarga kirish havolalari (har biri 1 martalik, {INVITE_LINK_EXPIRE_HOURS} soat ichida):\n"
+                f"Quyidagi guruhlarga kirish havolalari (har biri 1 martalik, {link_expire_text} amal qiladi):\n"
                 + "\n".join(links_out) +
                 f"\n\n⏳ Obuna tugash sanasi: {human_exp}"
             )
@@ -1027,10 +1028,11 @@ async def cb_pick_group(c: CallbackQuery):
         
         # User'ga link yuborish
         try:
+            link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
                 "✅ To'lov tasdiqlandi!\n"
-                f"Guruhga kirish havolasi (1 martalik, {INVITE_LINK_EXPIRE_HOURS} soat ichida):\n{link}\n\n"
+                f"Guruhga kirish havolasi (1 martalik, {link_expire_text} amal qiladi):\n{link}\n\n"
                 f"⏳ Obuna tugash sanasi: {human_exp}"
             )
         except Exception as e:
