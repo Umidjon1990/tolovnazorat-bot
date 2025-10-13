@@ -2,7 +2,16 @@
 
 This is a Telegram bot application built using the aiogram framework (Python). The bot manages user interactions, admin functionality, and private group access through invite links for an online course subscription system. The application uses SQLite (via aiosqlite) for data persistence and is configured through environment variables for deployment flexibility.
 
-# Recent Changes (October 6, 2025)
+# Recent Changes (October 13, 2025)
+
+- **Admin Message Cleanup**: All payment-related admin messages are automatically deleted after approval, keeping admin chat clean
+- **Final Summary with Receipt**: After approval, admin receives a clean summary message with payment receipt photo showing user details (name, username, phone, groups, expiry date)
+- **Statistics Filtering**: `/stats` command now shows only active users who are assigned to groups (filters out unassigned users)
+- **Invite Link Configuration**: Confirmed 1-time use links (member_limit=1) with 72-hour validity (INVITE_LINK_EXPIRE_HOURS=72)
+- **PostgreSQL Migration**: Successfully migrated from SQLite to PostgreSQL with asyncpg for Railway deployment stability
+- **Multi-group Support**: Enhanced checkbox-based group selection with message cleanup workflow
+
+# Previous Updates (October 6, 2025)
 
 - Fixed critical handler ordering issue - moved Command handlers before F.text handler to ensure commands are processed correctly
 - Removed fullname input step - phone number input now directly generates PDF contracts with auto-filled user info from Telegram
