@@ -419,9 +419,27 @@ def build_contract_files(user_fullname: str, user_phone: Optional[str]):
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+def admin_main_keyboard() -> InlineKeyboardMarkup:
+    """Admin uchun asosiy tugmalar."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="📋 To'lovlar", callback_data="admin_payments")]
+    ])
+
 @dp.message(Command("start"))
 async def cmd_start(m: Message):
     try:
+        # Admin uchun alohida interfeys
+        if is_admin(m.from_user.id):
+            await m.answer(
+                "👨‍💼 *ADMIN PANEL*\n\n"
+                "Quyidagi tugmalardan birini tanlang:",
+                reply_markup=admin_main_keyboard(),
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Oddiy foydalanuvchilar uchun shartnoma
         await m.answer("📄 *ONLAYN O'QUV SHARTNOMA*\n\n" + CONTRACT_TEXT, reply_markup=contract_keyboard(), parse_mode="Markdown")
         uname, full = await fetch_user_profile(m.from_user.id)
         await upsert_user(m.from_user.id, uname, full, group_id=0, expires_at=0)
@@ -801,6 +819,135 @@ async def cb_approve_now(c: CallbackQuery):
         logger.error(f"Error in cb_approve_now: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
+@dp.callback_query(F.data == "admin_stats")
+async def cb_admin_stats(c: CallbackQuery):
+    """Admin Statistika tugmasi handleri."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    if not GROUP_IDS:
+        await c.message.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
+        return await c.answer()
+    
+    now = int(datetime.utcnow().timestamp())
+    
+    # Barcha guruhlardagi unique userlarni yig'amiz
+    all_users = {}
+    for gid in GROUP_IDS:
+        members = await all_members_of_group(gid)
+        for uid, username, full_name, exp, phone in members:
+            if uid not in all_users or (all_users[uid] or 0) < (exp or 0):
+                all_users[uid] = exp
+    
+    # Statistika hisoblash
+    total = len(all_users)
+    active = sum(1 for exp in all_users.values() if exp and exp > now)
+    expired = sum(1 for exp in all_users.values() if exp and 0 < exp <= now)
+    
+    header = (
+        "📊 Statistika (faqat guruhdagilar)\n"
+        f"— Jami: {total}\n"
+        f"— Aktiv: {active}\n"
+        f"— Muddati tugagan: {expired}\n\n"
+        "📚 Guruhlar kesimi:"
+    )
+    await c.message.answer(header)
+    
+    titles = dict(await resolve_group_titles())
+    for gid in GROUP_IDS:
+        users = await all_members_of_group(gid)
+        # Faqat aktiv obunali foydalanuvchilarni qoldirish
+        active_users = [(uid, username, full_name, exp, phone) 
+                        for uid, username, full_name, exp, phone in users 
+                        if exp and exp > now]
+        
+        # Telegram API orqali guruhda turganlarni tekshirish
+        real_members = []
+        for uid, username, full_name, exp, phone in active_users:
+            try:
+                member = await bot.get_chat_member(gid, uid)
+                if member.status in ["member", "administrator", "creator"]:
+                    real_members.append((uid, username, full_name, exp, phone))
+            except Exception:
+                pass
+        
+        title = titles.get(gid, str(gid))
+        if not real_members:
+            await c.message.answer(f"🏷 {title} — 0 a'zo")
+            continue
+        
+        lines = [f"🏷 {title} — {len(real_members)} a'zo"]
+        now_loc_date = (datetime.utcnow() + TZ_OFFSET).date()
+        MAX_SHOW = 40
+        users_sorted = sorted(real_members, key=lambda r: (r[3] or 0), reverse=True)
+        for i, (uid, username, full_name, exp, phone) in enumerate(users_sorted[:MAX_SHOW], start=1):
+            exp_dt = (datetime.utcfromtimestamp(exp) + TZ_OFFSET).date() if exp else None
+            left_str = human_left(exp_dt, now_loc_date) if exp_dt else "—"
+            lines.append(f"{i}. {full_name or 'Nomsiz'} — {left_str}")
+        
+        if len(real_members) > MAX_SHOW:
+            lines.append(f"... +{len(real_members) - MAX_SHOW} ta ko'proq")
+        
+        await c.message.answer("\n".join(lines))
+    
+    await c.answer()
+
+@dp.callback_query(F.data == "admin_payments")
+async def cb_admin_payments(c: CallbackQuery):
+    """Admin To'lovlar tugmasi handleri - guruhlar kesimida pending to'lovlar."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        # Pending to'lovlarni olish
+        pending_payments = await db_pool.fetch(
+            "SELECT id, user_id, photo_file_id FROM payments WHERE status = 'pending' ORDER BY id ASC"
+        )
+        
+        if not pending_payments:
+            await c.message.answer("📋 Hozirda kutilayotgan to'lovlar yo'q.")
+            return await c.answer()
+        
+        titles = dict(await resolve_group_titles())
+        
+        # Har bir to'lov uchun ma'lumot yuborish
+        for payment in pending_payments:
+            pid = payment['id']
+            uid = payment['user_id']
+            photo_file_id = payment['photo_file_id']
+            
+            # User ma'lumotlarini olish
+            user_row = await get_user(uid)
+            if not user_row:
+                continue
+            
+            username = user_row[1] if len(user_row) > 1 else None
+            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            phone = user_row[5] if len(user_row) > 5 else "yo'q"
+            
+            # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
+            agreed_at = user_row[4] if len(user_row) > 4 else None
+            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at else "yo'q"
+            
+            kb = approve_keyboard(pid)
+            username_str = f"@{username}" if username else "yo'q"
+            caption = (
+                f"🧾 *To'lov cheki*\n\n"
+                f"👤 Ism: {full_name}\n"
+                f"📱 Username: {username_str}\n"
+                f"📞 Telefon: {phone}\n"
+                f"📄 Shartnoma: {contract_date}\n"
+                f"🆔 ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`"
+            )
+            
+            await c.message.answer_photo(photo_file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+        
+        await c.answer()
+    except Exception as e:
+        logger.error(f"Error in cb_admin_payments: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
 @dp.callback_query(F.data.startswith("ap_date:"))
 async def cb_approve_date(c: CallbackQuery):
     if not is_admin(c.from_user.id):
@@ -814,7 +961,9 @@ async def cb_approve_date(c: CallbackQuery):
         if _status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         WAIT_DATE_FOR[c.from_user.id] = pid
-        await c.message.answer("🗓 Boshlanish sanasini kiriting: YYYY-MM-DD (masalan 2025-10-01)")
+        msg = await c.message.answer("🗓 Boshlanish sanasini kiriting: YYYY-MM-DD (masalan 2025-10-01)")
+        if pid in ADMIN_MESSAGES:
+            ADMIN_MESSAGES[pid].append(msg.message_id)
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_approve_date: {e}")
@@ -836,7 +985,9 @@ async def cb_ap_single(c: CallbackQuery):
             cb = f"pick_group:{pid}:{gid}" if not with_date_iso else f"pick_group:{pid}:{gid}:with_date:{with_date_iso}"
             rows.append([InlineKeyboardButton(text=title, callback_data=cb)])
         kb = InlineKeyboardMarkup(inline_keyboard=rows)
-        await c.message.answer("🧭 Bitta guruhni tanlang:", reply_markup=kb)
+        msg = await c.message.answer("🧭 Bitta guruhni tanlang:", reply_markup=kb)
+        if pid in ADMIN_MESSAGES:
+            ADMIN_MESSAGES[pid].append(msg.message_id)
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_ap_single: {e}")
