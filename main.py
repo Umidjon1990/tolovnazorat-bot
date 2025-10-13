@@ -853,7 +853,7 @@ async def cb_approved_last3(c: CallbackQuery):
                 continue
             
             # Telegram'dan profil nomini olish (har doim yangi)
-            _, full_name = await fetch_user_profile(uid)
+            username, full_name = await fetch_user_profile(uid)
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -880,7 +880,8 @@ async def cb_approved_last3(c: CallbackQuery):
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            chat_link = f"📧 [Chat ochish](tg://user?id={uid})"
+            # Username bo'lsa @username, yo'qsa Chat ochish link
+            chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
                 f"👤 {full_name}\n"
@@ -928,7 +929,7 @@ async def cb_approved_all(c: CallbackQuery):
                 continue
             
             # Telegram'dan profil nomini olish (har doim yangi)
-            _, full_name = await fetch_user_profile(uid)
+            username, full_name = await fetch_user_profile(uid)
             primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -955,7 +956,8 @@ async def cb_approved_all(c: CallbackQuery):
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            chat_link = f"📧 [Chat ochish](tg://user?id={uid})"
+            # Username bo'lsa @username, yo'qsa Chat ochish link
+            chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
                 f"👤 {full_name}\n"
@@ -1002,7 +1004,7 @@ async def admin_pending_button(m: Message):
                 continue
             
             # Telegram'dan profil nomini olish (har doim yangi)
-            _, full_name = await fetch_user_profile(uid)
+            username, full_name = await fetch_user_profile(uid)
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
             # Kurs nomini olish
@@ -1021,7 +1023,8 @@ async def admin_pending_button(m: Message):
             contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
-            chat_link = f"📧 [Chat ochish](tg://user?id={uid})"
+            # Username bo'lsa @username, yo'qsa Chat ochish link
+            chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
                 f"👤 {full_name}\n"
@@ -1201,8 +1204,9 @@ async def on_photo(m: Message):
         course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
         
         # Telegram'dan profil nomini olish (har doim yangi)
-        _, full_name = await fetch_user_profile(m.from_user.id)
-        chat_link = f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
+        username, full_name = await fetch_user_profile(m.from_user.id)
+        # Username bo'lsa @username, yo'qsa Chat ochish link
+        chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
         
         kb = approve_keyboard(pid)
         caption = (
@@ -1354,7 +1358,8 @@ async def cb_admin_payments_approved(c: CallbackQuery):
             if not user_row:
                 continue
             
-            full_name = user_row[2] if len(user_row) > 2 else "Anonim"
+            # Telegram'dan profil nomini olish (har doim yangi)
+            username, full_name = await fetch_user_profile(uid)
             group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
@@ -1373,7 +1378,8 @@ async def cb_admin_payments_approved(c: CallbackQuery):
             # To'lov sanasi
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
-            chat_link = f"📧 [Chat ochish](tg://user?id={uid})"
+            # Username bo'lsa @username, yo'qsa Chat ochish link
+            chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={uid})"
             caption = (
                 f"✅ *Tasdiqlangan to'lov*\n\n"
                 f"👤 {full_name}\n"
@@ -1422,7 +1428,7 @@ async def cb_admin_payments_pending(c: CallbackQuery):
                 continue
             
             # Telegram'dan profil nomini olish (har doim yangi)
-            _, full_name = await fetch_user_profile(uid)
+            username, full_name = await fetch_user_profile(uid)
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
             # Kurs nomini olish
@@ -1441,7 +1447,8 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
             
             kb = approve_keyboard(pid)
-            chat_link = f"📧 [Chat ochish](tg://user?id={uid})"
+            # Username bo'lsa @username, yo'qsa Chat ochish link
+            chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={uid})"
             caption = (
                 f"⏳ *Kutilayotgan to'lov*\n\n"
                 f"👤 {full_name}\n"
@@ -1629,7 +1636,8 @@ async def cb_ms_confirm(c: CallbackQuery):
             group_names = ", ".join([titles.get(g, str(g)) for g in selected])
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-            chat_link = f"📧 [Chat ochish](tg://user?id={user_id})"
+            # Username bo'lsa @username, yo'qsa Chat ochish link
+            chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={user_id})"
             
             # Kurs nomini olish
             async with db_pool.acquire() as conn:
@@ -1730,7 +1738,8 @@ async def cb_pick_group(c: CallbackQuery):
         try:
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-            chat_link = f"📧 [Chat ochish](tg://user?id={user_id})"
+            # Username bo'lsa @username, yo'qsa Chat ochish link
+            chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={user_id})"
             
             # Kurs nomini olish
             async with db_pool.acquire() as conn:
@@ -1782,7 +1791,8 @@ async def cb_reject(c: CallbackQuery):
             
             # Admin chek xabarini yangilash
             try:
-                chat_link = f"📧 [Chat ochish](tg://user?id={user_id})"
+                # Username bo'lsa @username, yo'qsa Chat ochish link
+                chat_link = f"📧 @{username}" if username else f"📧 [Chat ochish](tg://user?id={user_id})"
                 new_caption = (
                     f"❌ *RAD ETILDI*\n\n"
                     f"👤 {full_name}\n"
