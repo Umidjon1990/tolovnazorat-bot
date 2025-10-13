@@ -1089,13 +1089,7 @@ async def on_contact(m: Message):
 
 @dp.callback_query(F.data == "pay_card")
 async def cb_pay_card(c: CallbackQuery):
-    await c.message.answer(
-        "💳 Karta raqami:\n9860160130847827 H.Halikova\n\n"
-        "📸 *Muhim:* To'lovdan so'ng chekni shu chatga yuboring va\n"
-        "rasm ostiga *kurs nomini* yozing!\n\n"
-        "Masalan: *A1 standard* yoki *A1 premium*",
-        parse_mode="Markdown"
-    )
+    await c.message.answer("💳 Karta raqami:\n9860160130847827 H.Halikova\n\nTo'lovdan so'ng chekni shu chatga yuboring.")
     await c.answer()
 
 @dp.callback_query(F.data == "pay_link")
@@ -1104,10 +1098,7 @@ async def cb_pay_link(c: CallbackQuery):
         "🔗 To'lov havolasi\n"
         "PAYME ORQALI: https://payme.uz/fallback/merchant/?id=68aebaff42ec20bb02a46c8c\n\n"
         "CLICK ORQALI: https://indoor.click.uz/pay?id=081968&t=0\n\n"
-        "📸 *Muhim:* To'lovdan so'ng chekni shu chatga yuboring va\n"
-        "rasm ostiga *kurs nomini* yozing!\n\n"
-        "Masalan: *A1 standard* yoki *A1 premium*",
-        parse_mode="Markdown"
+        "To'lovdan so'ng chekni shu chatga yuboring."
     )
     await c.answer()
 
