@@ -870,6 +870,11 @@ async def cb_approved_last3(c: CallbackQuery):
             if primary_group_id:
                 group_ids.add(primary_group_id)
             
+            # Kurs nomini olish
+            async with db_pool.acquire() as conn:
+                course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", uid)
+            course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
+            
             group_names = [titles.get(gid, str(gid)) for gid in group_ids]
             groups_str = ", ".join(group_names) if group_names else "yo'q"
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
@@ -882,6 +887,7 @@ async def cb_approved_last3(c: CallbackQuery):
                 f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
+                f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
                 f"⏳ Obuna tugashi: {expiry_date}\n"
                 f"📅 To'lov sanasi: {payment_date}\n"
@@ -940,6 +946,11 @@ async def cb_approved_all(c: CallbackQuery):
             if primary_group_id:
                 group_ids.add(primary_group_id)
             
+            # Kurs nomini olish
+            async with db_pool.acquire() as conn:
+                course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", uid)
+            course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
+            
             group_names = [titles.get(gid, str(gid)) for gid in group_ids]
             groups_str = ", ".join(group_names) if group_names else "yo'q"
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
@@ -952,6 +963,7 @@ async def cb_approved_all(c: CallbackQuery):
                 f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
+                f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruhlar: {groups_str}\n"
                 f"⏳ Obuna tugashi: {expiry_date}\n"
                 f"📅 To'lov sanasi: {payment_date}\n"
@@ -995,6 +1007,11 @@ async def admin_pending_button(m: Message):
             full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
+            # Kurs nomini olish
+            async with db_pool.acquire() as conn:
+                course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", uid)
+            course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
+            
             # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
             agreed_at = user_row[4] if len(user_row) > 4 else None
             # agreed_at ni int ga convert qilamiz (agar str bo'lsa)
@@ -1013,6 +1030,7 @@ async def admin_pending_button(m: Message):
                 f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
+                f"📚 Kurs: {course_name}\n"
                 f"📄 Shartnoma: {contract_date}\n"
                 f"🆔 User ID: `{uid}`\n"
                 f"💳 Payment ID: `{pid}`"
@@ -1345,6 +1363,11 @@ async def cb_admin_payments_approved(c: CallbackQuery):
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
             
+            # Kurs nomini olish
+            async with db_pool.acquire() as conn:
+                course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", uid)
+            course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
+            
             # Guruh nomini olish
             group_name = titles.get(group_id, str(group_id)) if group_id else "yo'q"
             
@@ -1361,6 +1384,7 @@ async def cb_admin_payments_approved(c: CallbackQuery):
                 f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
+                f"📚 Kurs: {course_name}\n"
                 f"🏫 Guruh: {group_name}\n"
                 f"⏳ Obuna tugashi: {expiry_date}\n"
                 f"📅 To'lov sanasi: {payment_date}\n"
@@ -1406,6 +1430,11 @@ async def cb_admin_payments_pending(c: CallbackQuery):
             full_name = user_row[2] if len(user_row) > 2 else "Anonim"
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             
+            # Kurs nomini olish
+            async with db_pool.acquire() as conn:
+                course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", uid)
+            course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
+            
             # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
             agreed_at = user_row[4] if len(user_row) > 4 else None
             # agreed_at ni int ga convert qilamiz (agar str bo'lsa)
@@ -1424,6 +1453,7 @@ async def cb_admin_payments_pending(c: CallbackQuery):
                 f"👤 {user_link}\n"
                 f"📧 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
+                f"📚 Kurs: {course_name}\n"
                 f"📄 Shartnoma: {contract_date}\n"
                 f"🆔 User ID: `{uid}`\n"
                 f"💳 Payment ID: `{pid}`"
