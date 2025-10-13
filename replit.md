@@ -13,8 +13,9 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 - **Architecture Files**: `MINI_APP_ARCHITECTURE.md` and `MINI_APP_SETUP.md` contain complete documentation
 - **Pages Created**: Contract, Courses (14 buttons), Phone input, Payment upload - all with Telegram SDK integration
 - **API Endpoints**: User endpoints (`/api/user/*`), Admin endpoints (`/api/admin/*`), Course endpoints (`/api/courses`)
-- **Authentication**: Telegram initData verification for secure access
+- **Authentication**: Telegram initData verification with 24-hour freshness check (replay attack protection)
 - **File Upload**: Payment receipts uploaded to `/uploads/` folder
+- **Railway Deployment**: Complete deployment guide in `RAILWAY_DEPLOY.md` - 3 services (Bot, API, Frontend)
 
 ## Previous Bot-Only Updates
 
