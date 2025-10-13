@@ -1,0 +1,48 @@
+2025-10-13 07:01:22,079 - __main__ - INFO - Starting bot...
+2025-10-13 07:01:22,102 - __main__ - INFO - Database initialized successfully at ./subs.db
+2025-10-13 07:01:22,102 - __main__ - INFO - Bot is now polling for updates
+2025-10-13 07:01:22,102 - aiogram.dispatcher - INFO - Start polling
+2025-10-13 07:01:22,549 - aiogram.dispatcher - INFO - Run polling for bot @tolovnazoratbot id=8387359293 - 'TOLOV NAZORAT'
+/app/main.py:294: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = int(datetime.utcnow().timestamp())
+/app/main.py:301: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = int(datetime.utcnow().timestamp())
+/app/main.py:282: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = int(datetime.utcnow().timestamp())
+/app/main.py:288: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = int(datetime.utcnow().timestamp())
+/app/main.py:535: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = int(datetime.utcnow().timestamp())
+2025-10-13 07:02:36,082 - aiogram.event - INFO - Update id=599026208 is handled. Duration 5469 ms by bot id=8387359293
+2025-10-13 07:03:43,058 - aiogram.event - INFO - Update id=599026209 is handled. Duration 5580 ms by bot id=8387359293
+2025-10-13 07:12:11,890 - aiogram.event - INFO - Update id=599026210 is handled. Duration 366 ms by bot id=8387359293
+2025-10-13 07:12:16,937 - aiogram.event - INFO - Update id=599026211 is handled. Duration 327 ms by bot id=8387359293
+/app/main.py:456: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  await update_user_agreed(c.from_user.id, int(datetime.utcnow().timestamp()))
+2025-10-13 07:13:00,072 - aiogram.event - INFO - Update id=599026212 is handled. Duration 327 ms by bot id=8387359293
+/app/main.py:415: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  stamped = f"{CONTRACT_TEXT}\n\n---\nO'quvchi: {user_fullname}\nTelefon: {user_phone or '-'}\nSana: {(datetime.utcnow()+TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n"
+2025-10-13 07:13:52,793 - __main__ - INFO - Contract documents sent to user 8148003874
+2025-10-13 07:13:52,793 - __main__ - INFO - Contract generated for user 8148003874, not sent to admins
+2025-10-13 07:13:52,988 - aiogram.event - INFO - Update id=599026213 is handled. Duration 1460 ms by bot id=8387359293
+2025-10-13 07:14:00,954 - aiogram.event - INFO - Update id=599026214 is handled. Duration 338 ms by bot id=8387359293
+/app/main.py:187: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  (user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp()))
+/app/main.py:770: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  f"📅 Vaqt: {(datetime.utcnow() + TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}"
+2025-10-13 07:14:09,168 - aiogram.event - INFO - Update id=599026215 is handled. Duration 848 ms by bot id=8387359293
+2025-10-13 07:14:39,791 - aiogram.event - INFO - Update id=599026216 is handled. Duration 326 ms by bot id=8387359293
+2025-10-13 07:14:46,709 - aiogram.event - INFO - Update id=599026217 is handled. Duration 201 ms by bot id=8387359293
+2025-10-13 07:14:59,353 - aiogram.event - INFO - Update id=599026218 is handled. Duration 2746 ms by bot id=8387359293
+2025-10-13 07:15:06,487 - aiogram.event - INFO - Update id=599026219 is handled. Duration 2351 ms by bot id=8387359293
+2025-10-13 07:15:12,359 - aiogram.event - INFO - Update id=599026220 is handled. Duration 2533 ms by bot id=8387359293
+/app/main.py:901: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  start_dt = datetime.utcnow()
+/app/main.py:380: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  expire = int((datetime.utcnow() + timedelta(hours=INVITE_LINK_EXPIRE_HOURS)).timestamp())
+/app/main.py:934: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+2025-10-13 07:15:18,193 - __main__ - WARNING - Failed to edit admin message: Telegram server says - Bad Request: there is no caption in the message to edit
+2025-10-13 07:15:18,348 - aiogram.event - INFO - Update id=599026221 is handled. Duration 3335 ms by bot id=8387359293
+2025-10-13 07:16:44,111 - aiogram.event - INFO - Update id=599026222 is handled. Duration 220 ms by bot id=8387359293
+Stopping Container
