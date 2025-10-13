@@ -739,44 +739,63 @@ async def admin_approved_button(m: Message):
     if not is_admin(m.from_user.id):
         return
     
+    # Tanlash tugmalarini ko'rsatish
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Oxirgi 3 tasi", callback_data="approved_last3")],
+        [InlineKeyboardButton(text="📚 Hammasi", callback_data="approved_all")]
+    ])
+    
+    await m.answer("✅ *Tasdiqlangan to'lovlar*\n\nQaysi birini ko'rmoqchisiz?", reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "approved_last3")
+async def cb_approved_last3(c: CallbackQuery):
+    """Oxirgi 3 ta tasdiqlangan to'lovni ko'rsatish."""
+    await c.answer()
+    
     try:
-        # Tasdiqlangan to'lovlarni olish
         approved_payments = await db_pool.fetch(
-            "SELECT id, user_id, photo_file, admin_id, created_at FROM payments WHERE status = 'approved' ORDER BY id DESC LIMIT 50"
+            "SELECT id, user_id, photo_file, admin_id, created_at FROM payments WHERE status = 'approved' ORDER BY id DESC LIMIT 3"
         )
         
         if not approved_payments:
-            await m.answer("✅ Hozircha tasdiqlangan to'lovlar yo'q.")
+            await c.message.edit_text("✅ Hozircha tasdiqlangan to'lovlar yo'q.")
             return
+        
+        await c.message.delete()
         
         titles = dict(await resolve_group_titles())
         
-        # Har bir to'lov uchun ma'lumot yuborish
         for payment in approved_payments:
             pid = payment['id']
             uid = payment['user_id']
             photo_file_id = payment['photo_file']
-            admin_id = payment['admin_id']
             created_at = payment['created_at']
             
-            # User ma'lumotlarini olish
             user_row = await get_user(uid)
             if not user_row:
                 continue
             
             username = user_row[1] if len(user_row) > 1 else None
             full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
-            group_id = user_row[3] if len(user_row) > 3 else None
+            primary_group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
             expires_at = user_row[6] if len(user_row) > 6 else None
             
-            # Guruh nomini olish
-            group_name = titles.get(group_id, str(group_id)) if group_id else "yo'q"
+            # Guruhlarni olish (user_groups + primary group)
+            groups_data = await db_pool.fetch(
+                "SELECT group_id FROM user_groups WHERE user_id = $1", uid
+            )
+            group_ids = set()
+            for row in groups_data:
+                group_ids.add(row['group_id'])
             
-            # Obuna tugash sanasi
+            # Primary group ham qo'shamiz (agar mavjud bo'lsa)
+            if primary_group_id:
+                group_ids.add(primary_group_id)
+            
+            group_names = [titles.get(gid, str(gid)) for gid in group_ids]
+            groups_str = ", ".join(group_names) if group_names else "yo'q"
             expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
-            
-            # To'lov sanasi
             payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
             
             username_str = f"@{username}" if username else "yo'q"
@@ -785,17 +804,86 @@ async def admin_approved_button(m: Message):
                 f"👤 Ism: {full_name}\n"
                 f"📱 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
-                f"🏫 Guruh: {group_name}\n"
+                f"🏫 Guruhlar: {groups_str}\n"
                 f"⏳ Obuna tugashi: {expiry_date}\n"
                 f"📅 To'lov sanasi: {payment_date}\n"
                 f"🆔 User ID: `{uid}`\n"
                 f"💳 Payment ID: `{pid}`"
             )
             
-            await m.answer_photo(photo_file_id, caption=caption, parse_mode="Markdown")
+            await bot.send_photo(c.from_user.id, photo_file_id, caption=caption, parse_mode="Markdown")
     except Exception as e:
-        logger.error(f"Error in admin_approved_button: {e}")
-        await m.answer("Xatolik yuz berdi")
+        logger.error(f"Error in cb_approved_last3: {e}")
+        await c.message.answer("Xatolik yuz berdi")
+
+@dp.callback_query(F.data == "approved_all")
+async def cb_approved_all(c: CallbackQuery):
+    """Barcha tasdiqlangan to'lovlarni ko'rsatish."""
+    await c.answer()
+    
+    try:
+        approved_payments = await db_pool.fetch(
+            "SELECT id, user_id, photo_file, admin_id, created_at FROM payments WHERE status = 'approved' ORDER BY id DESC"
+        )
+        
+        if not approved_payments:
+            await c.message.edit_text("✅ Hozircha tasdiqlangan to'lovlar yo'q.")
+            return
+        
+        await c.message.delete()
+        
+        titles = dict(await resolve_group_titles())
+        
+        for payment in approved_payments:
+            pid = payment['id']
+            uid = payment['user_id']
+            photo_file_id = payment['photo_file']
+            created_at = payment['created_at']
+            
+            user_row = await get_user(uid)
+            if not user_row:
+                continue
+            
+            username = user_row[1] if len(user_row) > 1 else None
+            full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            primary_group_id = user_row[3] if len(user_row) > 3 else None
+            phone = user_row[5] if len(user_row) > 5 else "yo'q"
+            expires_at = user_row[6] if len(user_row) > 6 else None
+            
+            # Guruhlarni olish (user_groups + primary group)
+            groups_data = await db_pool.fetch(
+                "SELECT group_id FROM user_groups WHERE user_id = $1", uid
+            )
+            group_ids = set()
+            for row in groups_data:
+                group_ids.add(row['group_id'])
+            
+            # Primary group ham qo'shamiz (agar mavjud bo'lsa)
+            if primary_group_id:
+                group_ids.add(primary_group_id)
+            
+            group_names = [titles.get(gid, str(gid)) for gid in group_ids]
+            groups_str = ", ".join(group_names) if group_names else "yo'q"
+            expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
+            payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
+            
+            username_str = f"@{username}" if username else "yo'q"
+            caption = (
+                f"✅ *Tasdiqlangan to'lov*\n\n"
+                f"👤 Ism: {full_name}\n"
+                f"📱 Username: {username_str}\n"
+                f"📞 Telefon: {phone}\n"
+                f"🏫 Guruhlar: {groups_str}\n"
+                f"⏳ Obuna tugashi: {expiry_date}\n"
+                f"📅 To'lov sanasi: {payment_date}\n"
+                f"🆔 User ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`"
+            )
+            
+            await bot.send_photo(c.from_user.id, photo_file_id, caption=caption, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error in cb_approved_all: {e}")
+        await c.message.answer("Xatolik yuz berdi")
 
 @dp.message(F.text == "⏳ Kutilayotgan to'lovlar")
 async def admin_pending_button(m: Message):
@@ -810,7 +898,7 @@ async def admin_pending_button(m: Message):
         )
         
         if not pending_payments:
-            await m.answer("⏳ Hozirda kutilayotgan to'lovlar yo'q.")
+            await m.answer("⏳ Kutilayotgan to'lovlar mavjud emas.")
             return
         
         # Har bir to'lov uchun ma'lumot yuborish
@@ -847,7 +935,7 @@ async def admin_pending_button(m: Message):
             await m.answer_photo(photo_file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error in admin_pending_button: {e}")
-        await m.answer("Xatolik yuz berdi")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
