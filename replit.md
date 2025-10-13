@@ -16,6 +16,12 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 - **Authentication**: Telegram initData verification with 24-hour freshness check (replay attack protection)
 - **File Upload**: Payment receipts uploaded to `/uploads/` folder
 - **Railway Deployment**: Complete deployment guide in `RAILWAY_DEPLOY.md` - 3 services (Bot, API, Frontend)
+- **Mini App Button**: Added "📱 Ilovani ochish" button to /start command (requires MINI_APP_URL env variable)
+- **Enhanced Payment Messages**: All payment notifications now include clickable user profile links and username display
+  - Yangi to'lov: User link (click to chat) + @username + phone + course
+  - Kutilayotgan to'lovlar: Clickable name, @username, phone, contract date
+  - Tasdiqlangan to'lovlar: Clickable name, @username, phone, groups, expiry
+  - Yakuniy xulosa: Clickable name, @username, phone, course, group
 
 ## Previous Bot-Only Updates
 
