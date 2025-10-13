@@ -894,27 +894,29 @@ async def cb_admin_stats(c: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_payments")
 async def cb_admin_payments(c: CallbackQuery):
-    """Admin To'lovlar tugmasi handleri - guruhlar kesimida pending to'lovlar."""
+    """Admin To'lovlar tugmasi handleri - tasdiqlangan to'lovlar."""
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
     try:
-        # Pending to'lovlarni olish
-        pending_payments = await db_pool.fetch(
-            "SELECT id, user_id, photo_file_id FROM payments WHERE status = 'pending' ORDER BY id ASC"
+        # Tasdiqlangan to'lovlarni olish
+        approved_payments = await db_pool.fetch(
+            "SELECT id, user_id, photo_file_id, admin_id, created_at FROM payments WHERE status = 'approved' ORDER BY id DESC LIMIT 50"
         )
         
-        if not pending_payments:
-            await c.message.answer("📋 Hozirda kutilayotgan to'lovlar yo'q.")
+        if not approved_payments:
+            await c.message.answer("📋 Hozircha tasdiqlangan to'lovlar yo'q.")
             return await c.answer()
         
         titles = dict(await resolve_group_titles())
         
         # Har bir to'lov uchun ma'lumot yuborish
-        for payment in pending_payments:
+        for payment in approved_payments:
             pid = payment['id']
             uid = payment['user_id']
             photo_file_id = payment['photo_file_id']
+            admin_id = payment['admin_id']
+            created_at = payment['created_at']
             
             # User ma'lumotlarini olish
             user_row = await get_user(uid)
@@ -923,25 +925,33 @@ async def cb_admin_payments(c: CallbackQuery):
             
             username = user_row[1] if len(user_row) > 1 else None
             full_name = user_row[2] if len(user_row) > 2 else "Nomsiz"
+            group_id = user_row[3] if len(user_row) > 3 else None
             phone = user_row[5] if len(user_row) > 5 else "yo'q"
+            expires_at = user_row[6] if len(user_row) > 6 else None
             
-            # Shartnoma ma'lumotlarini olish (agar bor bo'lsa)
-            agreed_at = user_row[4] if len(user_row) > 4 else None
-            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at else "yo'q"
+            # Guruh nomini olish
+            group_name = titles.get(group_id, str(group_id)) if group_id else "yo'q"
             
-            kb = approve_keyboard(pid)
+            # Obuna tugash sanasi
+            expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d") if expires_at else "yo'q"
+            
+            # To'lov sanasi
+            payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
+            
             username_str = f"@{username}" if username else "yo'q"
             caption = (
-                f"🧾 *To'lov cheki*\n\n"
+                f"✅ *Tasdiqlangan to'lov*\n\n"
                 f"👤 Ism: {full_name}\n"
                 f"📱 Username: {username_str}\n"
                 f"📞 Telefon: {phone}\n"
-                f"📄 Shartnoma: {contract_date}\n"
-                f"🆔 ID: `{uid}`\n"
+                f"🏫 Guruh: {group_name}\n"
+                f"⏳ Obuna tugashi: {expiry_date}\n"
+                f"📅 To'lov sanasi: {payment_date}\n"
+                f"🆔 User ID: `{uid}`\n"
                 f"💳 Payment ID: `{pid}`"
             )
             
-            await c.message.answer_photo(photo_file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+            await c.message.answer_photo(photo_file_id, caption=caption, parse_mode="Markdown")
         
         await c.answer()
     except Exception as e:
