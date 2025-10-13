@@ -69,6 +69,8 @@ MULTI_PICK: dict[int, dict] = {}
 WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
+# Admin xabarlarini kuzatish (payment_id -> [message_ids])
+ADMIN_MESSAGES: dict[int, list[int]] = {}
 
 CONTRACT_TEXT = """ONLAYN O'QUV SHARTNOMA
 
@@ -185,8 +187,8 @@ async def set_payment_status(pid: int, status: str, admin_id: Optional[int]):
 
 async def get_payment(pid: int):
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT id, user_id, status FROM payments WHERE id=$1", pid)
-        return (row['id'], row['user_id'], row['status']) if row else None
+        row = await conn.fetchrow("SELECT id, user_id, status, photo_file FROM payments WHERE id=$1", pid)
+        return (row['id'], row['user_id'], row['status'], row['photo_file']) if row else None
 
 async def upsert_user(uid: int, username: str, full_name: str, group_id: int, expires_at: int, phone: Optional[str] = None, agreed_at: Optional[int] = None):
     async with db_pool.acquire() as conn:
@@ -745,9 +747,14 @@ async def on_photo(m: Message):
             f"📅 Vaqt: {(datetime.utcnow() + TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}"
         )
         
+        # Admin xabarlarini kuzatish uchun
+        if pid not in ADMIN_MESSAGES:
+            ADMIN_MESSAGES[pid] = []
+        
         for aid in ADMIN_IDS:
             try:
-                await bot.send_photo(aid, m.photo[-1].file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+                msg = await bot.send_photo(aid, m.photo[-1].file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+                ADMIN_MESSAGES[pid].append(msg.message_id)
             except Exception as e:
                 logger.warning(f"Failed to send payment notification to admin {aid}: {e}")
     except Exception as e:
@@ -763,12 +770,14 @@ async def cb_approve_now(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, _uid, _status = row
+        _pid, _uid, _status, _ = row
         if _status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         if not GROUP_IDS:
             return await c.answer("ENV: PRIVATE_GROUP_ID bo'sh. Guruh chat_id larini kiriting.", show_alert=True)
-        await c.message.answer("🧭 Qanday qo'shamiz?", reply_markup=multi_select_entry_kb(pid, with_date_iso=None))
+        msg = await c.message.answer("🧭 Qanday qo'shamiz?", reply_markup=multi_select_entry_kb(pid, with_date_iso=None))
+        if pid in ADMIN_MESSAGES:
+            ADMIN_MESSAGES[pid].append(msg.message_id)
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_approve_now: {e}")
@@ -783,7 +792,7 @@ async def cb_approve_date(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, _uid, _status = row
+        _pid, _uid, _status, _ = row
         if _status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         WAIT_DATE_FOR[c.from_user.id] = pid
@@ -828,7 +837,9 @@ async def cb_ms_open(c: CallbackQuery):
         groups = await resolve_group_titles()
         MULTI_PICK[c.from_user.id] = {"pid": pid, "start_iso": with_date_iso, "selected": set()}
         kb = multi_select_kb(pid, groups, set(), with_date_iso)
-        await c.message.answer("🧭 Bir necha guruhni tanlang (✅ belgilab, so'ng Tasdiqlash):", reply_markup=kb)
+        msg = await c.message.answer("🧭 Bir necha guruhni tanlang (✅ belgilab, so'ng Tasdiqlash):", reply_markup=kb)
+        if pid in ADMIN_MESSAGES:
+            ADMIN_MESSAGES[pid].append(msg.message_id)
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_ms_open: {e}")
@@ -851,7 +862,9 @@ async def cb_ms_toggle(c: CallbackQuery):
             sel.add(gid)
         groups = await resolve_group_titles()
         kb = multi_select_kb(pid, groups, sel, state.get("start_iso"))
-        await c.message.answer("✅ Yangilandi. Davom eting:", reply_markup=kb)
+        msg = await c.message.answer("✅ Yangilandi. Davom eting:", reply_markup=kb)
+        if pid in ADMIN_MESSAGES:
+            ADMIN_MESSAGES[pid].append(msg.message_id)
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_ms_toggle: {e}")
@@ -870,7 +883,7 @@ async def cb_ms_confirm(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, user_id, status = row
+        _pid, user_id, status, photo_file_id = row
         if status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         start_dt = datetime.utcnow()
@@ -920,25 +933,36 @@ async def cb_ms_confirm(c: CallbackQuery):
         except Exception as e:
             logger.warning(f"Failed to send approval message to user {user_id}: {e}")
         
-        # Admin chek xabarini yangilash (edit qilish)
+        # Barcha admin xabarlarni o'chirish
+        if pid in ADMIN_MESSAGES:
+            for msg_id in ADMIN_MESSAGES[pid]:
+                try:
+                    await bot.delete_message(c.from_user.id, msg_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete admin message {msg_id}: {e}")
+            del ADMIN_MESSAGES[pid]
+        
+        # Yakuniy xulosa yuborish (chek rasmi bilan)
         try:
             group_names = ", ".join([titles.get(g, str(g)) for g in selected])
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+            username_str = f"@{username}" if username else "username yo'q"
             
-            new_caption = (
-                f"✅ *TASDIQLANDI*\n\n"
+            final_caption = (
+                f"✅ *HAVOLALAR YUBORILDI*\n\n"
                 f"👤 {full_name}\n"
-                f"📱 Telefon: {phone}\n"
+                f"📱 {username_str}\n"
+                f"📞 Telefon: {phone}\n"
                 f"🏫 Guruhlar: {group_names}\n"
                 f"⏳ Tugash: {human_exp}"
             )
-            await c.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
+            await bot.send_photo(c.from_user.id, photo_file_id, caption=final_caption, parse_mode="Markdown")
         except Exception as e:
-            logger.warning(f"Failed to edit admin message: {e}")
+            logger.warning(f"Failed to send final summary: {e}")
         
         MULTI_PICK.pop(c.from_user.id, None)
-        await c.answer("✅ Tanlangan guruhlarga havolalar yuborildi")
+        await c.answer("✅ Havolalar yuborildi, barcha xabarlar tozalandi")
     except Exception as e:
         logger.error(f"Error in cb_ms_confirm: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
@@ -957,7 +981,7 @@ async def cb_pick_group(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, user_id, status = row
+        _pid, user_id, status, photo_file_id = row
         if status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         start_dt = datetime.utcnow()
@@ -994,23 +1018,34 @@ async def cb_pick_group(c: CallbackQuery):
         except Exception as e:
             logger.warning(f"Failed to send approval message to user {user_id}: {e}")
         
-        # Admin chek xabarini yangilash (edit qilish)
+        # Barcha admin xabarlarni o'chirish
+        if pid in ADMIN_MESSAGES:
+            for msg_id in ADMIN_MESSAGES[pid]:
+                try:
+                    await bot.delete_message(c.from_user.id, msg_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete admin message {msg_id}: {e}")
+            del ADMIN_MESSAGES[pid]
+        
+        # Yakuniy xulosa yuborish (chek rasmi bilan)
         try:
             user_row = await get_user(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+            username_str = f"@{username}" if username else "username yo'q"
             
-            new_caption = (
-                f"✅ *TASDIQLANDI*\n\n"
+            final_caption = (
+                f"✅ *HAVOLA YUBORILDI*\n\n"
                 f"👤 {full_name}\n"
-                f"📱 Telefon: {phone}\n"
+                f"📱 {username_str}\n"
+                f"📞 Telefon: {phone}\n"
                 f"🏫 Guruh: {group_name}\n"
                 f"⏳ Tugash: {human_exp}"
             )
-            await c.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
+            await bot.send_photo(c.from_user.id, photo_file_id, caption=final_caption, parse_mode="Markdown")
         except Exception as e:
-            logger.warning(f"Failed to edit admin message: {e}")
+            logger.warning(f"Failed to send final summary: {e}")
         
-        await c.answer("✅ Tasdiqlandi va havola yuborildi")
+        await c.answer("✅ Havola yuborildi, barcha xabarlar tozalandi")
     except Exception as e:
         logger.error(f"Error in cb_pick_group: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
@@ -1023,7 +1058,7 @@ async def cb_reject(c: CallbackQuery):
         pid = int(c.data.split(":")[1])
         row = await get_payment(pid)
         if row:
-            _pid, user_id, _status = row
+            _pid, user_id, _status, _ = row
             user_row = await get_user(user_id)
             username, full_name = await fetch_user_profile(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
