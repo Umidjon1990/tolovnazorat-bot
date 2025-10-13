@@ -509,6 +509,29 @@ async def cb_terms_decline(c: CallbackQuery):
     await c.message.answer("❌ Shartnoma rad etildi. Xizmatlardan foydalanish uchun shartnomani tasdiqlash kerak.")
     await c.answer()
 
+@dp.callback_query(F.data.startswith("course:"))
+async def cb_course_select(c: CallbackQuery):
+    try:
+        course_name = c.data.split(":", 1)[1]
+        
+        # Database'ga kurs nomini saqlash
+        await execute_query(
+            "UPDATE users SET course_name = $1 WHERE user_id = $2",
+            course_name, c.from_user.id
+        )
+        
+        WAIT_CONTACT_FOR.add(c.from_user.id)
+        await c.message.answer(
+            f"✅ Kurs tanlandi: *{course_name}*\n\n"
+            "📞 Endi telefon raqamingizni yuboring:",
+            reply_markup=contact_keyboard(),
+            parse_mode="Markdown"
+        )
+        await c.answer()
+    except Exception as e:
+        logger.error(f"Error in cb_course_select: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
 @dp.message(Command("myid"))
 async def cmd_myid(m: Message):
     await m.answer(f"🆔 Sizning Telegram ID: `{m.from_user.id}`", parse_mode="Markdown")
