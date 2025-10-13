@@ -169,6 +169,16 @@ async def db_init():
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
         async with db_pool.acquire() as conn:
             await conn.execute(CREATE_SQL)
+            
+            # Migration: course_name ustunini qo'shish (agar yo'q bo'lsa)
+            try:
+                await conn.execute("""
+                    ALTER TABLE users ADD COLUMN IF NOT EXISTS course_name TEXT;
+                """)
+                logger.info("Migration: course_name column added/verified")
+            except Exception as me:
+                logger.warning(f"Migration warning (likely already exists): {me}")
+                
         logger.info("PostgreSQL database initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
