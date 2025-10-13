@@ -4,6 +4,11 @@ This is a Telegram bot application built using the aiogram framework (Python). T
 
 # Recent Changes (October 13, 2025)
 
+- **Admin Button Interface**: Replaced commands with buttons in `/start` for admins - "📊 Statistika" and "📋 To'lovlar" buttons
+- **Payments Display**: "To'lovlar" button shows all pending payments with full user details (name, username, phone, contract date, ID)
+- **Invite Link Messages**: Updated to show "3 kun amal qiladi" instead of "72 soat" for better UX (auto-calculated from INVITE_LINK_EXPIRE_HOURS)
+- **Complete Message Cleanup**: All admin messages (group selection, date input, approval messages) auto-delete after payment approval, leaving only receipt and final summary
+- **Admin Message Tracking**: Extended ADMIN_MESSAGES to include date input and single group selection messages
 - **Admin Message Cleanup**: All payment-related admin messages are automatically deleted after approval, keeping admin chat clean
 - **Final Summary with Receipt**: After approval, admin receives a clean summary message with payment receipt photo showing user details (name, username, phone, groups, expiry date)
 - **Statistics Filtering**: `/stats` command now shows only active users who are assigned to groups (filters out unassigned users)
