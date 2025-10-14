@@ -2,9 +2,19 @@
 
 This is a Telegram Mini App + Bot system for managing online course subscriptions. The system combines a React-based Telegram Mini App (for user interactions) with a Python Telegram bot (for admin functions and automation). Users interact through a modern web interface while admins manage everything via Telegram bot commands. The system uses PostgreSQL for data persistence and FastAPI for the REST API backend.
 
-# Recent Changes (October 13, 2025)
+# Recent Changes (October 14, 2025)
 
-## 🔥 **LATEST UPDATE - PROFILE NAME & CHAT LINK FIX**
+## 🔥 **LATEST UPDATE - ADMIN MANUAL GROUP LINKS**
+- **New Admin Feature**: "📎 Guruh linklari" button in admin panel for manual invite link creation
+- **Emergency Links**: Admins can create 1-time invite links for students who can't join automatically
+- **User Flow**: Admin selects group → enters user Telegram ID → link generated → can send directly to user
+- **Link Properties**: Same as payment approval links - 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), time-limited (72 hours)
+- **Smart Chat Links**: All messages now use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
+- **Markdown Fix**: Eliminated "can't parse entities" errors by standardizing all chat links to use `tg://user?id=` format
+
+## Previous Updates (October 13, 2025)
+
+### **PROFILE NAME & CHAT LINK FIX**
 - **All Payment Messages**: Now use `fetch_user_profile()` to get fresh profile names from Telegram API (not database)
 - **Consistent Format**: Every payment message shows profile name (line 1) + clickable "chat" link (line 2)
 - **9 Message Types Fixed**: New payment, pending (2 variants), approved (3 variants), final summary (2 variants), rejected
