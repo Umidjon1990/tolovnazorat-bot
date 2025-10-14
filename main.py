@@ -406,7 +406,8 @@ async def send_one_time_link(group_id: int, user_id: int) -> str:
         chat_id=group_id,
         name=f"sub-{user_id}",
         expire_date=expire,
-        member_limit=1
+        member_limit=1,
+        creates_join_request=False  # Avtomatik kirish, approval yo'q
     )
     return link.invite_link
 
