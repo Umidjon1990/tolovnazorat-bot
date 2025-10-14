@@ -4,14 +4,16 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 
 # Recent Changes (October 14, 2025)
 
-## 🔥 **LATEST UPDATE - STREAMLINED LINK CREATION (October 14, 2025)**
-- **Auto Link Generation**: "📎 Guruh linklari" button now auto-creates links WITHOUT user ID input
-- **Simplified Flow**: Admin clicks "📎 Guruh linklari" → selects groups (checkbox) → links auto-generated instantly
+## 🔥 **LATEST UPDATE - ADMIN LINKS WITH SUBSCRIPTION (October 14, 2025)**
+- **Full Subscription System**: "📎 Guruh linklari" now creates 30-day subscriptions with complete automation
+- **Database Integration**: Admin provides user ID → user added to database with 30-day expiry
+- **Auto Warnings & Kick**: Links include full subscription management (warnings, auto-kick after 30 days)
+- **Admin Flow**: Admin clicks "📎 Guruh linklari" → selects groups (checkbox) → enters user ID → subscription created + links shown
 - **Manual Sharing**: Links shown to admin only - admin copies and shares them with students directly
 - **No Expiry Display**: Removed link expiry time from ALL user messages - only shows "1 martalik" (one-time use)
-- **Link Properties**: 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), 72-hour expiry (backend only)
+- **Link Properties**: 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), 72-hour link expiry
 - **Smart Chat Links**: All messages use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
-- **Clean UX**: No confusing expiry times shown to users - just clear "1-time use" indication
+- **Unified System**: Both payment approval and admin link creation now use same subscription system
 
 ## Previous Updates (October 13, 2025)
 
