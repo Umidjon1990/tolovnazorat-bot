@@ -1150,26 +1150,21 @@ async def on_admin_date_handler(m: Message):
                         logger.error(f"Failed to create link for group {gid}: {e}")
                         links_out.append(f"• {group_title}: ❌ Xatolik - {str(e)}")
                 
-                # Admin'ga linklar ko'rsatish
+                # Admin'ga linklar ko'rsatish (faqat ko'rsatish, yuborish yo'q)
                 link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
-                
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📤 User'ga yuborish", callback_data=f"send_multi_links:{user_id}")]
-                ])
                 
                 await m.answer(
                     f"✅ *Linklar yaratildi!*\n\n"
                     f"👤 User ID: `{user_id}`\n\n"
                     f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
                     f"⏱ Amal qilish muddati: *{link_expire_text}*\n"
-                    f"🎫 Har biri *1 martalik*",
-                    reply_markup=kb,
+                    f"🎫 Har biri *1 martalik*\n\n"
+                    f"💡 Linkni o'quvchiga o'zingiz ulashing.",
                     parse_mode="Markdown"
                 )
                 
-                # State'ni yangilash - linklar saqlash
-                state["user_id"] = user_id
-                state["links"] = links_out
+                # State tozalash
+                MULTI_PICK_LINKS.pop(m.from_user.id, None)
                 
             except ValueError:
                 await m.answer("❗ Noto'g'ri format. Faqat raqam kiriting (Misol: 123456789)")
@@ -1948,53 +1943,6 @@ async def cb_confirm_link_groups(c: CallbackQuery):
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_confirm_link_groups: {e}")
-        await c.answer("Xatolik yuz berdi", show_alert=True)
-
-@dp.callback_query(F.data.startswith("send_multi_links:"))
-async def cb_send_multi_links(c: CallbackQuery):
-    """Ko'p linkni user'ga yuborish."""
-    if not is_admin(c.from_user.id):
-        return await c.answer("Faqat adminlar uchun", show_alert=True)
-    
-    try:
-        user_id = int(c.data.split(":")[1])
-        state = MULTI_PICK_LINKS.get(c.from_user.id)
-        
-        if not state or "links" not in state:
-            return await c.answer("Sessiya topilmadi.", show_alert=True)
-        
-        links_out = state.get("links", [])
-        
-        # User'ga barcha linklar yuborish
-        try:
-            link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
-            await bot.send_message(
-                user_id,
-                "✅ *To'lovingiz tasdiqlandi!*\n\n"
-                f"📚 Quyidagi guruhlarga kirish havolalari (har biri *1 martalik* bo'lib, boshqalarga ulashmang):\n\n"
-                + "\n".join(links_out) +
-                f"\n\n💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
-                f"🔔 Link amal qilish muddati: *{link_expire_text}*",
-                parse_mode="Markdown"
-            )
-            
-            # Admin'ga tasdiq
-            await c.message.edit_text(
-                f"✅ *Linklar yuborildi!*\n\n"
-                f"👤 User ID: `{user_id}`\n\n"
-                f"🔗 Yuborilgan linklar:\n" + "\n".join(links_out),
-                parse_mode="Markdown"
-            )
-            await c.answer("✅ Linklar user'ga yuborildi!")
-            
-            # State tozalash
-            MULTI_PICK_LINKS.pop(c.from_user.id, None)
-            
-        except Exception as e:
-            logger.error(f"Failed to send links to user {user_id}: {e}")
-            await c.answer(f"❌ User'ga yuborishda xatolik: {str(e)}", show_alert=True)
-    except Exception as e:
-        logger.error(f"Error in cb_send_multi_links: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("reject:"))

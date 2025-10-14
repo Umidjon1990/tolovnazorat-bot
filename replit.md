@@ -8,7 +8,8 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 - **Enhanced Admin Feature**: "📎 Guruh linklari" button now supports **multi-group selection** with checkbox interface
 - **Checkbox System**: Admins can select multiple groups (☑/☐) before creating links - same UX as payment approval
 - **Batch Link Creation**: After entering user Telegram ID, system auto-creates 1-time links for **all selected groups**
-- **User Flow**: Admin clicks "📎 Guruh linklari" → selects multiple groups (checkbox) → enters user ID → all links auto-created → sends to user
+- **User Flow**: Admin clicks "📎 Guruh linklari" → selects multiple groups (checkbox) → enters user ID → all links displayed for admin to share manually
+- **Manual Sharing**: Links shown to admin only - admin copies and shares them with students directly
 - **Link Properties**: Same as payment approval - 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), time-limited (72 hours)
 - **Smart Chat Links**: All messages now use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
 - **Markdown Fix**: Eliminated "can't parse entities" errors by standardizing all chat links to use `tg://user?id=` format
