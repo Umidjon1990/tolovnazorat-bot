@@ -1124,9 +1124,42 @@ async def admin_group_links_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
-    # User ID kiritish (ko'p guruh uchun link yaratish + database'ga qo'shish)
+    # Admin link yaratish - Sana kiritish (agar waiting_date = True bo'lsa)
     if m.from_user.id in MULTI_PICK_LINKS:
         state = MULTI_PICK_LINKS.get(m.from_user.id)
+        
+        # Sana kiritish
+        if state and state.get("waiting_date"):
+            try:
+                raw = (m.text or "").strip().replace("/", "-")
+                if not DATE_RE.match(raw):
+                    return await m.answer("❗ Format noto'g'ri. To'g'ri ko'rinish: 2025-10-01")
+                try:
+                    start_dt = datetime.strptime(raw, "%Y-%m-%d")
+                except Exception:
+                    return await m.answer("❗ Sana tushunilmadi. Misol: 2025-10-01")
+                
+                # State'da sanani saqlaymiz
+                state["start_date"] = start_dt.isoformat()
+                state["waiting_date"] = False
+                
+                # User ID so'rash
+                await m.answer(
+                    f"✅ Sana qabul qilindi: *{raw}*\n\n"
+                    f"🆔 *O'quvchining Telegram ID raqamini kiriting:*\n\n"
+                    f"(Misol: 123456789)\n\n"
+                    f"💡 O'quvchi /myid buyrug'i bilan ID ni olishi mumkin.\n\n"
+                    f"📅 Obuna {raw} dan boshlanadi\n"
+                    f"✅ Database'ga qo'shiladi va 30 kunlik obuna beriladi.",
+                    parse_mode="Markdown"
+                )
+                return
+            except Exception as e:
+                logger.error(f"Error in link date handler: {e}")
+                await m.answer("Xatolik yuz berdi")
+                return
+        
+        # User ID kiritish (ko'p guruh uchun link yaratish + database'ga qo'shish)
         if state and "selected" in state:
             try:
                 user_id = int((m.text or "").strip())
@@ -1140,8 +1173,15 @@ async def on_admin_date_handler(m: Message):
                 # User ma'lumotlarini olish
                 username, full_name = await fetch_user_profile(user_id)
                 
+                # Boshlanish sanasini aniqlash
+                if state.get("start_date"):
+                    # Maxsus sana
+                    start_dt = datetime.fromisoformat(state["start_date"])
+                else:
+                    # Hozirdan
+                    start_dt = datetime.utcnow()
+                
                 # 30 kunlik obuna yaratish
-                start_dt = datetime.utcnow()
                 expires_at = int((start_dt + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
                 
                 # Database'ga qo'shish
@@ -1171,6 +1211,7 @@ async def on_admin_date_handler(m: Message):
                 
                 # Obuna tugash sanasi
                 human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+                human_start = (start_dt + TZ_OFFSET).strftime("%Y-%m-%d")
                 group_names = ", ".join([titles.get(g, str(g)) for g in selected])
                 
                 # Admin'ga linklar va obuna ma'lumotlarini ko'rsatish
@@ -1181,6 +1222,7 @@ async def on_admin_date_handler(m: Message):
                     f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
                     f"🎫 Har biri *1 martalik*\n"
                     f"🏫 Guruhlar: {group_names}\n"
+                    f"📅 Obuna boshlanish: *{human_start}*\n"
                     f"⏳ Obuna tugash: *{human_exp}* (30 kun)\n\n"
                     f"✅ Database'ga qo'shildi - ogohlantiruvlar va auto-kick ishlaydi!\n\n"
                     f"💡 Linkni o'quvchiga o'zingiz ulashing.",
@@ -1936,7 +1978,7 @@ async def cb_toggle_link_group(c: CallbackQuery):
 
 @dp.callback_query(F.data == "confirm_link_groups")
 async def cb_confirm_link_groups(c: CallbackQuery):
-    """Tanlangan guruhlarni tasdiqlash va User ID so'rash."""
+    """Tanlangan guruhlarni tasdiqlash va sana tanlash."""
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
@@ -1949,22 +1991,78 @@ async def cb_confirm_link_groups(c: CallbackQuery):
         if not selected:
             return await c.answer("Hech bo'lmaganda bitta guruhni tanlang.", show_alert=True)
         
-        # Tanlangan guruh nomlarini ko'rsatish va user ID so'rash
+        # Tanlangan guruh nomlarini ko'rsatish va sana tanlash
         titles = dict(await resolve_group_titles())
         group_names = [titles.get(g, str(g)) for g in selected]
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🕐 Hozirdan", callback_data="link_date_now")],
+            [InlineKeyboardButton(text="📅 Sana tanlash", callback_data="link_date_custom")]
+        ])
         
         await c.message.edit_text(
             f"📎 *Tanlangan guruhlar:*\n"
             + "\n".join([f"• {name}" for name in group_names]) +
-            f"\n\n🆔 O'quvchining Telegram ID raqamini kiriting:\n"
-            f"(Misol: 123456789)\n\n"
-            f"💡 O'quvchi /myid buyrug'i bilan ID ni olishi mumkin.\n\n"
-            f"✅ User database'ga qo'shiladi va 30 kunlik obuna beriladi.",
+            f"\n\n📅 *Obuna qachondan boshlansin?*",
+            reply_markup=kb,
             parse_mode="Markdown"
         )
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_confirm_link_groups: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data == "link_date_now")
+async def cb_link_date_now(c: CallbackQuery):
+    """Hozirdan boshlanadigan obuna - User ID so'rash."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        state = MULTI_PICK_LINKS.get(c.from_user.id)
+        if not state:
+            return await c.answer("Sessiya topilmadi.", show_alert=True)
+        
+        # Hozirdan boshlanadi (state'da start_date = None)
+        state["start_date"] = None
+        
+        await c.message.edit_text(
+            f"🆔 *O'quvchining Telegram ID raqamini kiriting:*\n\n"
+            f"(Misol: 123456789)\n\n"
+            f"💡 O'quvchi /myid buyrug'i bilan ID ni olishi mumkin.\n\n"
+            f"📅 Obuna bugundan boshlanadi\n"
+            f"✅ Database'ga qo'shiladi va 30 kunlik obuna beriladi.",
+            parse_mode="Markdown"
+        )
+        await c.answer("✅ Bugundan boshlanadi")
+    except Exception as e:
+        logger.error(f"Error in cb_link_date_now: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data == "link_date_custom")
+async def cb_link_date_custom(c: CallbackQuery):
+    """Maxsus sanadan boshlanadigan obuna - Sana so'rash."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        state = MULTI_PICK_LINKS.get(c.from_user.id)
+        if not state:
+            return await c.answer("Sessiya topilmadi.", show_alert=True)
+        
+        # Sana kiritish rejimini yoqamiz
+        state["waiting_date"] = True
+        
+        await c.message.edit_text(
+            f"📅 *Obuna boshlanish sanasini kiriting:*\n\n"
+            f"Format: YYYY-MM-DD\n"
+            f"Misol: 2025-10-20\n\n"
+            f"💡 Bu sanadan boshlab 30 kunlik obuna beriladi.",
+            parse_mode="Markdown"
+        )
+        await c.answer("📅 Sana kiriting")
+    except Exception as e:
+        logger.error(f"Error in cb_link_date_custom: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("reject:"))
