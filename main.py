@@ -1124,52 +1124,7 @@ async def admin_group_links_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
-    # User ID kiritish (ko'p guruh uchun link yaratish)
-    if m.from_user.id in MULTI_PICK_LINKS:
-        state = MULTI_PICK_LINKS.get(m.from_user.id)
-        if state and "selected" in state:
-            try:
-                user_id = int((m.text or "").strip())
-                selected: set = state.get("selected", set())
-                
-                if not selected:
-                    await m.answer("❗ Guruh tanlanmagan. Qaytadan boshlang.")
-                    MULTI_PICK_LINKS.pop(m.from_user.id, None)
-                    return
-                
-                # Barcha tanlangan guruhlar uchun linklar yaratish
-                titles = dict(await resolve_group_titles())
-                links_out = []
-                
-                for gid in selected:
-                    group_title = titles.get(gid, str(gid))
-                    try:
-                        link = await send_one_time_link(gid, user_id)
-                        links_out.append(f"• {group_title}: {link}")
-                    except Exception as e:
-                        logger.error(f"Failed to create link for group {gid}: {e}")
-                        links_out.append(f"• {group_title}: ❌ Xatolik - {str(e)}")
-                
-                # Admin'ga linklar ko'rsatish (faqat ko'rsatish, yuborish yo'q)
-                await m.answer(
-                    f"✅ *Linklar yaratildi!*\n\n"
-                    f"👤 User ID: `{user_id}`\n\n"
-                    f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
-                    f"🎫 Har biri *1 martalik*\n\n"
-                    f"💡 Linkni o'quvchiga o'zingiz ulashing.",
-                    parse_mode="Markdown"
-                )
-                
-                # State tozalash
-                MULTI_PICK_LINKS.pop(m.from_user.id, None)
-                
-            except ValueError:
-                await m.answer("❗ Noto'g'ri format. Faqat raqam kiriting (Misol: 123456789)")
-            except Exception as e:
-                logger.error(f"Error in multi_link handler: {e}")
-                await m.answer("Xatolik yuz berdi")
-            return
-    
+    # Sana kiritish (to'lov tasdiqlash uchun)
     if m.from_user.id in WAIT_DATE_FOR:
         try:
             raw = (m.text or "").strip().replace("/", "-")
@@ -1908,7 +1863,7 @@ async def cb_toggle_link_group(c: CallbackQuery):
 
 @dp.callback_query(F.data == "confirm_link_groups")
 async def cb_confirm_link_groups(c: CallbackQuery):
-    """Tanlangan guruhlarni tasdiqlash va User ID so'rash."""
+    """Tanlangan guruhlar uchun avtomatik linklar yaratish."""
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
@@ -1921,19 +1876,36 @@ async def cb_confirm_link_groups(c: CallbackQuery):
         if not selected:
             return await c.answer("Hech bo'lmaganda bitta guruhni tanlang.", show_alert=True)
         
-        # Tanlangan guruh nomlarini ko'rsatish
+        # Barcha tanlangan guruhlar uchun linklar yaratish (user ID kerak emas)
         titles = dict(await resolve_group_titles())
-        group_names = [titles.get(g, str(g)) for g in selected]
+        links_out = []
         
+        # Unique link nomi uchun timestamp ishlatamiz
+        import time
+        link_id = int(time.time())
+        
+        for gid in selected:
+            group_title = titles.get(gid, str(gid))
+            try:
+                link = await send_one_time_link(gid, link_id)
+                links_out.append(f"• {group_title}: {link}")
+            except Exception as e:
+                logger.error(f"Failed to create link for group {gid}: {e}")
+                links_out.append(f"• {group_title}: ❌ Xatolik - {str(e)}")
+        
+        # Admin'ga linklar ko'rsatish
         await c.message.edit_text(
-            f"📎 *Tanlangan guruhlar:*\n"
-            + "\n".join([f"• {name}" for name in group_names]) +
-            f"\n\n🆔 O'quvchining Telegram ID raqamini kiriting:\n"
-            f"(Misol: 123456789)\n\n"
-            f"💡 O'quvchi /myid buyrug'i bilan ID ni olishi mumkin.",
+            f"✅ *Linklar yaratildi!*\n\n"
+            f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
+            f"🎫 Har biri *1 martalik*\n\n"
+            f"💡 Linkni o'quvchiga o'zingiz ulashing.",
             parse_mode="Markdown"
         )
-        await c.answer()
+        
+        # State tozalash
+        MULTI_PICK_LINKS.pop(c.from_user.id, None)
+        await c.answer("✅ Linklar tayyor!")
+        
     except Exception as e:
         logger.error(f"Error in cb_confirm_link_groups: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
