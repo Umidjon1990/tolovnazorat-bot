@@ -4,16 +4,18 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 
 # Recent Changes (October 14, 2025)
 
-## 🔥 **LATEST UPDATE - ADMIN LINKS WITH SUBSCRIPTION (October 14, 2025)**
+## 🔥 **LATEST UPDATE - ADMIN LINKS WITH DATE SELECTION (October 14, 2025)**
 - **Full Subscription System**: "📎 Guruh linklari" now creates 30-day subscriptions with complete automation
-- **Database Integration**: Admin provides user ID → user added to database with 30-day expiry
+- **Date Selection**: Admin can choose "Hozirdan" (from today) or "Sana tanlash" (custom start date) - same as payment approval
+- **Flexible Start Date**: Subscriptions can start immediately or from a future date
+- **Database Integration**: Admin provides user ID → user added to database with 30-day expiry from selected date
 - **Auto Warnings & Kick**: Links include full subscription management (warnings, auto-kick after 30 days)
-- **Admin Flow**: Admin clicks "📎 Guruh linklari" → selects groups (checkbox) → enters user ID → subscription created + links shown
+- **Admin Flow**: Admin clicks "📎 Guruh linklari" → selects groups (checkbox) → chooses start date → enters user ID → subscription created + links shown
 - **Manual Sharing**: Links shown to admin only - admin copies and shares them with students directly
 - **No Expiry Display**: Removed link expiry time from ALL user messages - only shows "1 martalik" (one-time use)
 - **Link Properties**: 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), 72-hour link expiry
 - **Smart Chat Links**: All messages use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
-- **Unified System**: Both payment approval and admin link creation now use same subscription system
+- **Unified System**: Both payment approval and admin link creation now use identical subscription system with date selection
 
 ## Previous Updates (October 13, 2025)
 
