@@ -1083,6 +1083,37 @@ async def admin_cleanup_button(m: Message):
         logger.error(f"Error in admin_cleanup_button: {e}")
         await m.answer("Xatolik yuz berdi")
 
+@dp.message(F.text == "📎 Guruh linklari")
+async def admin_group_links_button(m: Message):
+    """Admin guruh linklari yaratish tugmasi."""
+    if not is_admin(m.from_user.id):
+        return
+    
+    try:
+        titles = dict(await resolve_group_titles())
+        if not titles:
+            return await m.answer("❗ Guruhlar topilmadi. .env faylida PRIVATE_GROUP_ID ni tekshiring.")
+        
+        # Guruhlarni inline keyboard sifatida ko'rsatamiz
+        keyboard = []
+        for gid, title in titles.items():
+            keyboard.append([InlineKeyboardButton(
+                text=f"🔗 {title}",
+                callback_data=f"create_link:{gid}"
+            )])
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
+        await m.answer(
+            "📎 *Guruh linklari yaratish*\n\n"
+            "Qaysi guruh uchun link yaratmoqchisiz?\n"
+            "Link *1 martalik* va muddatli bo'ladi.",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error in admin_group_links_button: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
     if m.from_user.id in WAIT_DATE_FOR:
