@@ -4,14 +4,15 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 
 # Recent Changes (October 14, 2025)
 
-## 🔥 **LATEST UPDATE - ADMIN MANUAL GROUP LINKS**
-- **New Admin Feature**: "📎 Guruh linklari" button in admin panel for manual invite link creation
-- **Emergency Links**: Admins can create 1-time invite links for students who can't join automatically
-- **User Flow**: Admin selects group → enters user Telegram ID → link generated → can send directly to user
-- **Link Properties**: Same as payment approval links - 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), time-limited (72 hours)
+## 🔥 **LATEST UPDATE - MULTI-GROUP LINK CREATION**
+- **Enhanced Admin Feature**: "📎 Guruh linklari" button now supports **multi-group selection** with checkbox interface
+- **Checkbox System**: Admins can select multiple groups (☑/☐) before creating links - same UX as payment approval
+- **Batch Link Creation**: After entering user Telegram ID, system auto-creates 1-time links for **all selected groups**
+- **User Flow**: Admin clicks "📎 Guruh linklari" → selects multiple groups (checkbox) → enters user ID → all links auto-created → sends to user
+- **Link Properties**: Same as payment approval - 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), time-limited (72 hours)
 - **Smart Chat Links**: All messages now use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
 - **Markdown Fix**: Eliminated "can't parse entities" errors by standardizing all chat links to use `tg://user?id=` format
-- **Enhanced Link Messages**: User link messages now include clear warnings ("boshqalarga ulashmang"), subscription info, and proper formatting with Markdown
+- **Enhanced Link Messages**: User messages include clear warnings ("boshqalarga ulashmang"), subscription info, and proper Markdown formatting
 
 ## Previous Updates (October 13, 2025)
 
