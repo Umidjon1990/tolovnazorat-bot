@@ -4,12 +4,13 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 
 # Recent Changes (October 14, 2025)
 
-## 🔥 **LATEST UPDATE - ADMIN PANEL SIMPLIFICATION (October 14, 2025)**
-- **Removed Admin Link Creation**: Completely removed "📎 Guruh linklari" button and all admin manual link creation functionality
-- **Primary Workflow**: Payment approval is now the ONLY method for creating subscriptions and sending invite links
-- **Design Philosophy**: Simplified admin panel - all subscriptions come from payment approvals (with date selection)
-- **No Expiry Display**: Removed link expiry time from ALL user messages - only shows "1 martalik" (one-time use)
-- **Link Properties**: 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), 72-hour link expiry
+## 🔥 **LATEST UPDATE - UNLIMITED INVITE LINKS (October 14, 2025)**
+- **Link Expiry Removed**: Invite links no longer have time expiration - they remain valid until used
+- **One-Time Use**: Links remain one-time use only (`member_limit=1`) - automatically expire after first person joins
+- **No Time Limit**: Links can be used anytime - no 72-hour restriction anymore
+- **Perfect for Flexible Scheduling**: Students can join whenever convenient without rushing due to link expiry
+- **Admin Panel Simplification**: Removed "📎 Guruh linklari" button - payment approval is the ONLY method for creating subscriptions
+- **Primary Workflow**: All subscriptions come from payment approvals (with date selection)
 - **Smart Chat Links**: All messages use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
 - **Clean Admin Panel**: 4 buttons only - "📊 Statistika", "✅ Tasdiqlangan to'lovlar", "⏳ Kutilayotgan to'lovlar", "🧹 Tozalash"
 
