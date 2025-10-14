@@ -11,6 +11,7 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 - **Link Properties**: Same as payment approval links - 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), time-limited (72 hours)
 - **Smart Chat Links**: All messages now use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
 - **Markdown Fix**: Eliminated "can't parse entities" errors by standardizing all chat links to use `tg://user?id=` format
+- **Enhanced Link Messages**: User link messages now include clear warnings ("boshqalarga ulashmang"), subscription info, and proper formatting with Markdown
 
 ## Previous Updates (October 13, 2025)
 

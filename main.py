@@ -1683,10 +1683,13 @@ async def cb_ms_confirm(c: CallbackQuery):
             link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
-                "✅ To'lov tasdiqlandi!\n"
-                f"Quyidagi guruhlarga kirish havolalari (har biri 1 martalik, {link_expire_text} amal qiladi):\n"
+                "✅ *To'lovingiz tasdiqlandi!*\n\n"
+                f"📚 Quyidagi guruhlarga kirish havolalari (har biri *1 martalik* bo'lib, boshqalarga ulashmang):\n\n"
                 + "\n".join(links_out) +
-                f"\n\n⏳ Obuna tugash sanasi: {human_exp}"
+                f"\n\n💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
+                f"⏳ Obuna tugash sanasi: *{human_exp}*\n"
+                f"🔔 Link amal qilish muddati: *{link_expire_text}*",
+                parse_mode="Markdown"
             )
         except Exception as e:
             logger.warning(f"Failed to send approval message to user {user_id}: {e}")
@@ -1891,13 +1894,15 @@ async def cb_send_link(c: CallbackQuery):
         
         # User'ga yuborish
         try:
+            link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
                 f"🎓 *Guruhga kirish havolasi*\n\n"
                 f"🏫 Guruh: {group_title}\n"
                 f"🔗 Havola: {link}\n\n"
-                f"⏱ Amal qilish muddati: {INVITE_LINK_EXPIRE_HOURS} soat\n"
-                f"🎫 Bu havola *1 martalik* - faqat siz foydalana olasiz.",
+                f"💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
+                f"🔔 Link amal qilish muddati: *{link_expire_text}*\n"
+                f"🎫 Bu havola *1 martalik* bo'lib, boshqalarga ulashmang!",
                 parse_mode="Markdown"
             )
             
