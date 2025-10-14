@@ -1124,6 +1124,79 @@ async def admin_group_links_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
+    # User ID kiritish (ko'p guruh uchun link yaratish + database'ga qo'shish)
+    if m.from_user.id in MULTI_PICK_LINKS:
+        state = MULTI_PICK_LINKS.get(m.from_user.id)
+        if state and "selected" in state:
+            try:
+                user_id = int((m.text or "").strip())
+                selected: set = state.get("selected", set())
+                
+                if not selected:
+                    await m.answer("❗ Guruh tanlanmagan. Qaytadan boshlang.")
+                    MULTI_PICK_LINKS.pop(m.from_user.id, None)
+                    return
+                
+                # User ma'lumotlarini olish
+                username, full_name = await fetch_user_profile(user_id)
+                
+                # 30 kunlik obuna yaratish
+                start_dt = datetime.utcnow()
+                expires_at = int((start_dt + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+                
+                # Database'ga qo'shish
+                selected_list = list(selected)
+                primary_gid = selected_list[0]
+                
+                # Asosiy guruhga qo'shish
+                await upsert_user(uid=user_id, username=username, full_name=full_name, group_id=primary_gid, expires_at=expires_at)
+                
+                # Qo'shimcha guruhlar
+                extra_gids = [g for g in selected_list if g != primary_gid]
+                for g in extra_gids:
+                    await add_user_group(user_id, g, expires_at)
+                
+                # Barcha tanlangan guruhlar uchun linklar yaratish
+                titles = dict(await resolve_group_titles())
+                links_out = []
+                
+                for gid in selected:
+                    group_title = titles.get(gid, str(gid))
+                    try:
+                        link = await send_one_time_link(gid, user_id)
+                        links_out.append(f"• {group_title}: {link}")
+                    except Exception as e:
+                        logger.error(f"Failed to create link for group {gid}: {e}")
+                        links_out.append(f"• {group_title}: ❌ Xatolik - {str(e)}")
+                
+                # Obuna tugash sanasi
+                human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+                group_names = ", ".join([titles.get(g, str(g)) for g in selected])
+                
+                # Admin'ga linklar va obuna ma'lumotlarini ko'rsatish
+                await m.answer(
+                    f"✅ *OBUNA VA LINKLAR YARATILDI!*\n\n"
+                    f"👤 {full_name}\n"
+                    f"🆔 User ID: `{user_id}`\n\n"
+                    f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
+                    f"🎫 Har biri *1 martalik*\n"
+                    f"🏫 Guruhlar: {group_names}\n"
+                    f"⏳ Obuna tugash: *{human_exp}* (30 kun)\n\n"
+                    f"✅ Database'ga qo'shildi - ogohlantiruvlar va auto-kick ishlaydi!\n\n"
+                    f"💡 Linkni o'quvchiga o'zingiz ulashing.",
+                    parse_mode="Markdown"
+                )
+                
+                # State tozalash
+                MULTI_PICK_LINKS.pop(m.from_user.id, None)
+                
+            except ValueError:
+                await m.answer("❗ Noto'g'ri format. Faqat raqam kiriting (Misol: 123456789)")
+            except Exception as e:
+                logger.error(f"Error in multi_link handler: {e}")
+                await m.answer(f"Xatolik yuz berdi: {str(e)}")
+            return
+    
     # Sana kiritish (to'lov tasdiqlash uchun)
     if m.from_user.id in WAIT_DATE_FOR:
         try:
@@ -1863,7 +1936,7 @@ async def cb_toggle_link_group(c: CallbackQuery):
 
 @dp.callback_query(F.data == "confirm_link_groups")
 async def cb_confirm_link_groups(c: CallbackQuery):
-    """Tanlangan guruhlar uchun avtomatik linklar yaratish."""
+    """Tanlangan guruhlarni tasdiqlash va User ID so'rash."""
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
@@ -1876,36 +1949,20 @@ async def cb_confirm_link_groups(c: CallbackQuery):
         if not selected:
             return await c.answer("Hech bo'lmaganda bitta guruhni tanlang.", show_alert=True)
         
-        # Barcha tanlangan guruhlar uchun linklar yaratish (user ID kerak emas)
+        # Tanlangan guruh nomlarini ko'rsatish va user ID so'rash
         titles = dict(await resolve_group_titles())
-        links_out = []
+        group_names = [titles.get(g, str(g)) for g in selected]
         
-        # Unique link nomi uchun timestamp ishlatamiz
-        import time
-        link_id = int(time.time())
-        
-        for gid in selected:
-            group_title = titles.get(gid, str(gid))
-            try:
-                link = await send_one_time_link(gid, link_id)
-                links_out.append(f"• {group_title}: {link}")
-            except Exception as e:
-                logger.error(f"Failed to create link for group {gid}: {e}")
-                links_out.append(f"• {group_title}: ❌ Xatolik - {str(e)}")
-        
-        # Admin'ga linklar ko'rsatish
         await c.message.edit_text(
-            f"✅ *Linklar yaratildi!*\n\n"
-            f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
-            f"🎫 Har biri *1 martalik*\n\n"
-            f"💡 Linkni o'quvchiga o'zingiz ulashing.",
+            f"📎 *Tanlangan guruhlar:*\n"
+            + "\n".join([f"• {name}" for name in group_names]) +
+            f"\n\n🆔 O'quvchining Telegram ID raqamini kiriting:\n"
+            f"(Misol: 123456789)\n\n"
+            f"💡 O'quvchi /myid buyrug'i bilan ID ni olishi mumkin.\n\n"
+            f"✅ User database'ga qo'shiladi va 30 kunlik obuna beriladi.",
             parse_mode="Markdown"
         )
-        
-        # State tozalash
-        MULTI_PICK_LINKS.pop(c.from_user.id, None)
-        await c.answer("✅ Linklar tayyor!")
-        
+        await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_confirm_link_groups: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
