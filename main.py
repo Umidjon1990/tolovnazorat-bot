@@ -1085,7 +1085,7 @@ async def admin_cleanup_button(m: Message):
 
 @dp.message(F.text == "📎 Guruh linklari")
 async def admin_group_links_button(m: Message):
-    """Admin guruh linklari yaratish tugmasi."""
+    """Admin guruh linklari yaratish tugmasi - ko'p guruh tanlash."""
     if not is_admin(m.from_user.id):
         return
     
@@ -1094,18 +1094,26 @@ async def admin_group_links_button(m: Message):
         if not titles:
             return await m.answer("❗ Guruhlar topilmadi. .env faylida PRIVATE_GROUP_ID ni tekshiring.")
         
-        # Guruhlarni inline keyboard sifatida ko'rsatamiz
+        # Multi-select uchun state yaratish
+        MULTI_PICK_LINKS[m.from_user.id] = {"selected": set()}
+        
+        # Checkbox keyboard yaratish
         keyboard = []
         for gid, title in titles.items():
             keyboard.append([InlineKeyboardButton(
-                text=f"🔗 {title}",
-                callback_data=f"create_link:{gid}"
+                text=f"☐ {title}",
+                callback_data=f"toggle_link:{gid}"
             )])
+        keyboard.append([InlineKeyboardButton(
+            text="✅ Davom etish",
+            callback_data="confirm_link_groups"
+        )])
         
         kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await m.answer(
             "📎 *Guruh linklari yaratish*\n\n"
-            "Qaysi guruh uchun link yaratmoqchisiz?\n"
+            "Qaysi guruh(lar) uchun link yaratmoqchisiz?\n"
+            "Bir nechta guruhni tanlashingiz mumkin.\n\n"
             "Link *1 martalik* va muddatli bo'ladi.",
             reply_markup=kb,
             parse_mode="Markdown"
@@ -1116,42 +1124,59 @@ async def admin_group_links_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
-    # User ID kiritish (guruh link yaratish uchun)
-    if m.from_user.id in WAIT_USER_ID_FOR_LINK:
-        try:
-            user_id = int((m.text or "").strip())
-            gid = WAIT_USER_ID_FOR_LINK.pop(m.from_user.id)
-            titles = dict(await resolve_group_titles())
-            group_title = titles.get(gid, str(gid))
-            
-            # Link yaratish (1 martalik)
+    # User ID kiritish (ko'p guruh uchun link yaratish)
+    if m.from_user.id in MULTI_PICK_LINKS:
+        state = MULTI_PICK_LINKS.get(m.from_user.id)
+        if state and "selected" in state:
             try:
-                link = await send_one_time_link(gid, user_id)
+                user_id = int((m.text or "").strip())
+                selected: set = state.get("selected", set())
                 
-                # Linkni inline keyboard bilan ko'rsatish
+                if not selected:
+                    await m.answer("❗ Guruh tanlanmagan. Qaytadan boshlang.")
+                    MULTI_PICK_LINKS.pop(m.from_user.id, None)
+                    return
+                
+                # Barcha tanlangan guruhlar uchun linklar yaratish
+                titles = dict(await resolve_group_titles())
+                links_out = []
+                
+                for gid in selected:
+                    group_title = titles.get(gid, str(gid))
+                    try:
+                        link = await send_one_time_link(gid, user_id)
+                        links_out.append(f"• {group_title}: {link}")
+                    except Exception as e:
+                        logger.error(f"Failed to create link for group {gid}: {e}")
+                        links_out.append(f"• {group_title}: ❌ Xatolik - {str(e)}")
+                
+                # Admin'ga linklar ko'rsatish
+                link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
+                
                 kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📤 User'ga yuborish", callback_data=f"send_link:{user_id}:{gid}")]
+                    [InlineKeyboardButton(text="📤 User'ga yuborish", callback_data=f"send_multi_links:{user_id}")]
                 ])
                 
                 await m.answer(
-                    f"✅ *Link yaratildi!*\n\n"
-                    f"🏫 Guruh: {group_title}\n"
-                    f"👤 User ID: `{user_id}`\n"
-                    f"🔗 Link: {link}\n\n"
-                    f"⏱ Amal qilish muddati: {INVITE_LINK_EXPIRE_HOURS} soat\n"
-                    f"🎫 Foydalanish: 1 martalik",
+                    f"✅ *Linklar yaratildi!*\n\n"
+                    f"👤 User ID: `{user_id}`\n\n"
+                    f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
+                    f"⏱ Amal qilish muddati: *{link_expire_text}*\n"
+                    f"🎫 Har biri *1 martalik*",
                     reply_markup=kb,
                     parse_mode="Markdown"
                 )
+                
+                # State'ni yangilash - linklar saqlash
+                state["user_id"] = user_id
+                state["links"] = links_out
+                
+            except ValueError:
+                await m.answer("❗ Noto'g'ri format. Faqat raqam kiriting (Misol: 123456789)")
             except Exception as e:
-                logger.error(f"Failed to create link for user {user_id}, group {gid}: {e}")
-                await m.answer(f"❌ Link yaratishda xatolik: {str(e)}")
-        except ValueError:
-            await m.answer("❗ Noto'g'ri format. Faqat raqam kiriting (Misol: 123456789)")
-        except Exception as e:
-            logger.error(f"Error in user_id_for_link handler: {e}")
-            await m.answer("Xatolik yuz berdi")
-        return
+                logger.error(f"Error in multi_link handler: {e}")
+                await m.answer("Xatolik yuz berdi")
+            return
     
     if m.from_user.id in WAIT_DATE_FOR:
         try:
@@ -1850,80 +1875,126 @@ async def cb_pick_group(c: CallbackQuery):
         logger.error(f"Error in cb_pick_group: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
-# State for waiting user ID for link creation
-WAIT_USER_ID_FOR_LINK: dict[int, int] = {}
+# State for multi-group link creation
+MULTI_PICK_LINKS: dict[int, dict] = {}  # admin_id -> {"selected": set(), "user_id": int}
 
-@dp.callback_query(F.data.startswith("create_link:"))
-async def cb_create_link(c: CallbackQuery):
-    """Guruh uchun link yaratish callback."""
+@dp.callback_query(F.data.startswith("toggle_link:"))
+async def cb_toggle_link_group(c: CallbackQuery):
+    """Guruhni tanlash/bekor qilish (checkbox)."""
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
     try:
         gid = int(c.data.split(":")[1])
-        titles = dict(await resolve_group_titles())
-        group_title = titles.get(gid, str(gid))
+        state = MULTI_PICK_LINKS.get(c.from_user.id)
+        if not state:
+            return await c.answer("Sessiya topilmadi. Qaytadan boshlang.", show_alert=True)
         
-        # Admin'dan user ID ni so'raymiz
-        WAIT_USER_ID_FOR_LINK[c.from_user.id] = gid
+        selected: set = state.get("selected", set())
+        if gid in selected:
+            selected.remove(gid)
+        else:
+            selected.add(gid)
+        state["selected"] = selected
+        
+        # Keyboard yangilash
+        titles = dict(await resolve_group_titles())
+        keyboard = []
+        for g, title in titles.items():
+            check = "☑" if g in selected else "☐"
+            keyboard.append([InlineKeyboardButton(
+                text=f"{check} {title}",
+                callback_data=f"toggle_link:{g}"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            text="✅ Davom etish",
+            callback_data="confirm_link_groups"
+        )])
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
+        await c.message.edit_reply_markup(reply_markup=kb)
+        await c.answer()
+    except Exception as e:
+        logger.error(f"Error in cb_toggle_link_group: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data == "confirm_link_groups")
+async def cb_confirm_link_groups(c: CallbackQuery):
+    """Tanlangan guruhlarni tasdiqlash va User ID so'rash."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        state = MULTI_PICK_LINKS.get(c.from_user.id)
+        if not state:
+            return await c.answer("Sessiya topilmadi.", show_alert=True)
+        
+        selected: set = state.get("selected", set())
+        if not selected:
+            return await c.answer("Hech bo'lmaganda bitta guruhni tanlang.", show_alert=True)
+        
+        # Tanlangan guruh nomlarini ko'rsatish
+        titles = dict(await resolve_group_titles())
+        group_names = [titles.get(g, str(g)) for g in selected]
         
         await c.message.edit_text(
-            f"🔗 *{group_title} guruhiga link yaratish*\n\n"
-            f"O'quvchining Telegram ID raqamini kiriting:\n"
+            f"📎 *Tanlangan guruhlar:*\n"
+            + "\n".join([f"• {name}" for name in group_names]) +
+            f"\n\n🆔 O'quvchining Telegram ID raqamini kiriting:\n"
             f"(Misol: 123456789)\n\n"
             f"💡 O'quvchi /myid buyrug'i bilan ID ni olishi mumkin.",
             parse_mode="Markdown"
         )
         await c.answer()
     except Exception as e:
-        logger.error(f"Error in cb_create_link: {e}")
+        logger.error(f"Error in cb_confirm_link_groups: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
-@dp.callback_query(F.data.startswith("send_link:"))
-async def cb_send_link(c: CallbackQuery):
-    """Yaratilgan linkni user'ga yuborish."""
+@dp.callback_query(F.data.startswith("send_multi_links:"))
+async def cb_send_multi_links(c: CallbackQuery):
+    """Ko'p linkni user'ga yuborish."""
     if not is_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
     try:
-        parts = c.data.split(":")
-        user_id = int(parts[1])
-        gid = int(parts[2])
+        user_id = int(c.data.split(":")[1])
+        state = MULTI_PICK_LINKS.get(c.from_user.id)
         
-        titles = dict(await resolve_group_titles())
-        group_title = titles.get(gid, str(gid))
+        if not state or "links" not in state:
+            return await c.answer("Sessiya topilmadi.", show_alert=True)
         
-        # Yangi link yaratish (eski link ishlatilgan bo'lishi mumkin)
-        link = await send_one_time_link(gid, user_id)
+        links_out = state.get("links", [])
         
-        # User'ga yuborish
+        # User'ga barcha linklar yuborish
         try:
             link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
-                f"🎓 *Guruhga kirish havolasi*\n\n"
-                f"🏫 Guruh: {group_title}\n"
-                f"🔗 Havola: {link}\n\n"
-                f"💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
-                f"🔔 Link amal qilish muddati: *{link_expire_text}*\n"
-                f"🎫 Bu havola *1 martalik* bo'lib, boshqalarga ulashmang!",
+                "✅ *To'lovingiz tasdiqlandi!*\n\n"
+                f"📚 Quyidagi guruhlarga kirish havolalari (har biri *1 martalik* bo'lib, boshqalarga ulashmang):\n\n"
+                + "\n".join(links_out) +
+                f"\n\n💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
+                f"🔔 Link amal qilish muddati: *{link_expire_text}*",
                 parse_mode="Markdown"
             )
             
             # Admin'ga tasdiq
             await c.message.edit_text(
-                f"✅ *Link yuborildi!*\n\n"
-                f"👤 User ID: `{user_id}`\n"
-                f"🏫 Guruh: {group_title}\n"
-                f"🔗 Link: {link}",
+                f"✅ *Linklar yuborildi!*\n\n"
+                f"👤 User ID: `{user_id}`\n\n"
+                f"🔗 Yuborilgan linklar:\n" + "\n".join(links_out),
                 parse_mode="Markdown"
             )
-            await c.answer("✅ Link user'ga yuborildi!")
+            await c.answer("✅ Linklar user'ga yuborildi!")
+            
+            # State tozalash
+            MULTI_PICK_LINKS.pop(c.from_user.id, None)
+            
         except Exception as e:
-            logger.error(f"Failed to send link to user {user_id}: {e}")
+            logger.error(f"Failed to send links to user {user_id}: {e}")
             await c.answer(f"❌ User'ga yuborishda xatolik: {str(e)}", show_alert=True)
     except Exception as e:
-        logger.error(f"Error in cb_send_link: {e}")
+        logger.error(f"Error in cb_send_multi_links: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("reject:"))
