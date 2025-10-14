@@ -4,16 +4,14 @@ This is a Telegram Mini App + Bot system for managing online course subscription
 
 # Recent Changes (October 14, 2025)
 
-## 🔥 **LATEST UPDATE - MULTI-GROUP LINK CREATION**
-- **Enhanced Admin Feature**: "📎 Guruh linklari" button now supports **multi-group selection** with checkbox interface
-- **Checkbox System**: Admins can select multiple groups (☑/☐) before creating links - same UX as payment approval
-- **Batch Link Creation**: After entering user Telegram ID, system auto-creates 1-time links for **all selected groups**
-- **User Flow**: Admin clicks "📎 Guruh linklari" → selects multiple groups (checkbox) → enters user ID → all links displayed for admin to share manually
+## 🔥 **LATEST UPDATE - STREAMLINED LINK CREATION (October 14, 2025)**
+- **Auto Link Generation**: "📎 Guruh linklari" button now auto-creates links WITHOUT user ID input
+- **Simplified Flow**: Admin clicks "📎 Guruh linklari" → selects groups (checkbox) → links auto-generated instantly
 - **Manual Sharing**: Links shown to admin only - admin copies and shares them with students directly
-- **Link Properties**: Same as payment approval - 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), time-limited (72 hours)
-- **Smart Chat Links**: All messages now use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
-- **Markdown Fix**: Eliminated "can't parse entities" errors by standardizing all chat links to use `tg://user?id=` format
-- **Enhanced Link Messages**: User messages include clear warnings ("boshqalarga ulashmang"), subscription info, and proper Markdown formatting
+- **No Expiry Display**: Removed link expiry time from ALL user messages - only shows "1 martalik" (one-time use)
+- **Link Properties**: 1-time use (`member_limit=1`), auto-join (`creates_join_request=False`), 72-hour expiry (backend only)
+- **Smart Chat Links**: All messages use `[username](tg://user?id=...)` format - displays username when available, "Chat ochish" when not
+- **Clean UX**: No confusing expiry times shown to users - just clear "1-time use" indication
 
 ## Previous Updates (October 13, 2025)
 
