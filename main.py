@@ -1790,9 +1790,13 @@ async def cb_pick_group(c: CallbackQuery):
             link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
-                "✅ To'lov tasdiqlandi!\n"
-                f"Guruhga kirish havolasi (1 martalik, {link_expire_text} amal qiladi):\n{link}\n\n"
-                f"⏳ Obuna tugash sanasi: {human_exp}"
+                "✅ *To'lovingiz tasdiqlandi!*\n\n"
+                f"📚 Guruhga kirish havolasi (*1 martalik* bo'lib, boshqalarga ulashmang):\n\n"
+                f"• {group_name}: {link}\n\n"
+                f"💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
+                f"⏳ Obuna tugash sanasi: *{human_exp}*\n"
+                f"🔔 Link amal qilish muddati: *{link_expire_text}*",
+                parse_mode="Markdown"
             )
         except Exception as e:
             logger.warning(f"Failed to send approval message to user {user_id}: {e}")
