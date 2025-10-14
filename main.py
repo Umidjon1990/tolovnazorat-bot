@@ -401,12 +401,10 @@ async def resolve_group_titles() -> list[tuple[int, str]]:
     return result
 
 async def send_one_time_link(group_id: int, user_id: int) -> str:
-    expire = int((datetime.utcnow() + timedelta(hours=INVITE_LINK_EXPIRE_HOURS)).timestamp())
     link = await bot.create_chat_invite_link(
         chat_id=group_id,
         name=f"sub-{user_id}",
-        expire_date=expire,
-        member_limit=1,
+        member_limit=1,  # Faqat 1 kishi kirishi mumkin (bir martalik)
         creates_join_request=False  # Avtomatik kirish, approval yo'q
     )
     return link.invite_link
