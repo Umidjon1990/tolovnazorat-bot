@@ -1151,13 +1151,10 @@ async def on_admin_date_handler(m: Message):
                         links_out.append(f"• {group_title}: ❌ Xatolik - {str(e)}")
                 
                 # Admin'ga linklar ko'rsatish (faqat ko'rsatish, yuborish yo'q)
-                link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
-                
                 await m.answer(
                     f"✅ *Linklar yaratildi!*\n\n"
                     f"👤 User ID: `{user_id}`\n\n"
                     f"🔗 Linklar:\n" + "\n".join(links_out) + f"\n\n"
-                    f"⏱ Amal qilish muddati: *{link_expire_text}*\n"
                     f"🎫 Har biri *1 martalik*\n\n"
                     f"💡 Linkni o'quvchiga o'zingiz ulashing.",
                     parse_mode="Markdown"
@@ -1700,15 +1697,13 @@ async def cb_ms_confirm(c: CallbackQuery):
         
         # User'ga linklar yuborish
         try:
-            link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
                 "✅ *To'lovingiz tasdiqlandi!*\n\n"
                 f"📚 Quyidagi guruhlarga kirish havolalari (har biri *1 martalik* bo'lib, boshqalarga ulashmang):\n\n"
                 + "\n".join(links_out) +
                 f"\n\n💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
-                f"⏳ Obuna tugash sanasi: *{human_exp}*\n"
-                f"🔔 Link amal qilish muddati: *{link_expire_text}*",
+                f"⏳ Obuna tugash sanasi: *{human_exp}*",
                 parse_mode="Markdown"
             )
         except Exception as e:
@@ -1807,15 +1802,13 @@ async def cb_pick_group(c: CallbackQuery):
         
         # User'ga link yuborish
         try:
-            link_expire_text = f"{INVITE_LINK_EXPIRE_HOURS // 24} kun" if INVITE_LINK_EXPIRE_HOURS >= 24 else f"{INVITE_LINK_EXPIRE_HOURS} soat"
             await bot.send_message(
                 user_id,
                 "✅ *To'lovingiz tasdiqlandi!*\n\n"
                 f"📚 Guruhga kirish havolasi (*1 martalik* bo'lib, boshqalarga ulashmang):\n\n"
                 f"• {group_name}: {link}\n\n"
                 f"💡 *Eslatma:* Bu guruhga kirish linki bo'lib, guruhga kirgach siz doimiy *OBUNA REJANGIZGA* ko'ra foydalanasiz.\n\n"
-                f"⏳ Obuna tugash sanasi: *{human_exp}*\n"
-                f"🔔 Link amal qilish muddati: *{link_expire_text}*",
+                f"⏳ Obuna tugash sanasi: *{human_exp}*",
                 parse_mode="Markdown"
             )
         except Exception as e:
