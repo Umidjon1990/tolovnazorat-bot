@@ -471,7 +471,7 @@ def admin_reply_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📊 Statistika")],
             [KeyboardButton(text="✅ Tasdiqlangan to'lovlar"), KeyboardButton(text="⏳ Kutilayotgan to'lovlar")],
-            [KeyboardButton(text="🧹 Tozalash")]
+            [KeyboardButton(text="📎 Guruh linklari"), KeyboardButton(text="🧹 Tozalash")]
         ],
         resize_keyboard=True,
         persistent=True
