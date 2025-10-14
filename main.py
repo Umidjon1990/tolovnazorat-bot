@@ -1116,6 +1116,43 @@ async def admin_group_links_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
+    # User ID kiritish (guruh link yaratish uchun)
+    if m.from_user.id in WAIT_USER_ID_FOR_LINK:
+        try:
+            user_id = int((m.text or "").strip())
+            gid = WAIT_USER_ID_FOR_LINK.pop(m.from_user.id)
+            titles = dict(await resolve_group_titles())
+            group_title = titles.get(gid, str(gid))
+            
+            # Link yaratish (1 martalik)
+            try:
+                link = await send_one_time_link(gid, user_id)
+                
+                # Linkni inline keyboard bilan ko'rsatish
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📤 User'ga yuborish", callback_data=f"send_link:{user_id}:{gid}")]
+                ])
+                
+                await m.answer(
+                    f"✅ *Link yaratildi!*\n\n"
+                    f"🏫 Guruh: {group_title}\n"
+                    f"👤 User ID: `{user_id}`\n"
+                    f"🔗 Link: {link}\n\n"
+                    f"⏱ Amal qilish muddati: {INVITE_LINK_EXPIRE_HOURS} soat\n"
+                    f"🎫 Foydalanish: 1 martalik",
+                    reply_markup=kb,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to create link for user {user_id}, group {gid}: {e}")
+                await m.answer(f"❌ Link yaratishda xatolik: {str(e)}")
+        except ValueError:
+            await m.answer("❗ Noto'g'ri format. Faqat raqam kiriting (Misol: 123456789)")
+        except Exception as e:
+            logger.error(f"Error in user_id_for_link handler: {e}")
+            await m.answer("Xatolik yuz berdi")
+        return
+    
     if m.from_user.id in WAIT_DATE_FOR:
         try:
             raw = (m.text or "").strip().replace("/", "-")
@@ -1804,6 +1841,80 @@ async def cb_pick_group(c: CallbackQuery):
         await c.answer("✅ Havola yuborildi, barcha xabarlar tozalandi")
     except Exception as e:
         logger.error(f"Error in cb_pick_group: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+# State for waiting user ID for link creation
+WAIT_USER_ID_FOR_LINK: dict[int, int] = {}
+
+@dp.callback_query(F.data.startswith("create_link:"))
+async def cb_create_link(c: CallbackQuery):
+    """Guruh uchun link yaratish callback."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        gid = int(c.data.split(":")[1])
+        titles = dict(await resolve_group_titles())
+        group_title = titles.get(gid, str(gid))
+        
+        # Admin'dan user ID ni so'raymiz
+        WAIT_USER_ID_FOR_LINK[c.from_user.id] = gid
+        
+        await c.message.edit_text(
+            f"🔗 *{group_title} guruhiga link yaratish*\n\n"
+            f"O'quvchining Telegram ID raqamini kiriting:\n"
+            f"(Misol: 123456789)\n\n"
+            f"💡 O'quvchi /myid buyrug'i bilan ID ni olishi mumkin.",
+            parse_mode="Markdown"
+        )
+        await c.answer()
+    except Exception as e:
+        logger.error(f"Error in cb_create_link: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("send_link:"))
+async def cb_send_link(c: CallbackQuery):
+    """Yaratilgan linkni user'ga yuborish."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        parts = c.data.split(":")
+        user_id = int(parts[1])
+        gid = int(parts[2])
+        
+        titles = dict(await resolve_group_titles())
+        group_title = titles.get(gid, str(gid))
+        
+        # Yangi link yaratish (eski link ishlatilgan bo'lishi mumkin)
+        link = await send_one_time_link(gid, user_id)
+        
+        # User'ga yuborish
+        try:
+            await bot.send_message(
+                user_id,
+                f"🎓 *Guruhga kirish havolasi*\n\n"
+                f"🏫 Guruh: {group_title}\n"
+                f"🔗 Havola: {link}\n\n"
+                f"⏱ Amal qilish muddati: {INVITE_LINK_EXPIRE_HOURS} soat\n"
+                f"🎫 Bu havola *1 martalik* - faqat siz foydalana olasiz.",
+                parse_mode="Markdown"
+            )
+            
+            # Admin'ga tasdiq
+            await c.message.edit_text(
+                f"✅ *Link yuborildi!*\n\n"
+                f"👤 User ID: `{user_id}`\n"
+                f"🏫 Guruh: {group_title}\n"
+                f"🔗 Link: {link}",
+                parse_mode="Markdown"
+            )
+            await c.answer("✅ Link user'ga yuborildi!")
+        except Exception as e:
+            logger.error(f"Failed to send link to user {user_id}: {e}")
+            await c.answer(f"❌ User'ga yuborishda xatolik: {str(e)}", show_alert=True)
+    except Exception as e:
+        logger.error(f"Error in cb_send_link: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("reject:"))
