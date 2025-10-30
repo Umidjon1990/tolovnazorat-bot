@@ -611,20 +611,22 @@ async def get_admin_info(uid: int):
             SELECT * FROM admins WHERE user_id = $1
         """, uid)
 
-async def add_admin_to_db(user_id: int, name: str, role: str, created_by: int, expires_at: Optional[int] = None, managed_groups: Optional[list[int]] = None):
+async def add_admin_to_db(user_id: int, name: str, role: str, created_by: int, expires_at: Optional[int] = None, managed_groups: Optional[list[int]] = None, max_groups: int = -1, tariff: str = "custom"):
     """Yangi admin qo'shish"""
     async with db_pool.acquire() as conn:
         now = int(datetime.utcnow().timestamp())
         await conn.execute("""
-            INSERT INTO admins(user_id, name, role, active, created_at, expires_at, created_by, managed_groups)
-            VALUES($1, $2, $3, TRUE, $4, $5, $6, $7)
+            INSERT INTO admins(user_id, name, role, active, created_at, expires_at, created_by, managed_groups, max_groups, tariff)
+            VALUES($1, $2, $3, TRUE, $4, $5, $6, $7, $8, $9)
             ON CONFLICT(user_id) DO UPDATE SET
                 name = $2,
                 role = $3,
                 active = TRUE,
                 expires_at = $5,
-                managed_groups = $7
-        """, user_id, name, role, now, expires_at, created_by, managed_groups or [])
+                managed_groups = $7,
+                max_groups = $8,
+                tariff = $9
+        """, user_id, name, role, now, expires_at, created_by, managed_groups or [], max_groups, tariff)
 
 async def remove_admin_from_db(user_id: int):
     """Adminni o'chirish"""
@@ -1200,9 +1202,18 @@ async def cmd_admins(m: Message):
         expires_at = row['expires_at']
         created_at = row['created_at']
         managed_groups = row['managed_groups'] or []
+        max_groups = row.get('max_groups', -1)
+        tariff_key = row.get('tariff', 'custom')
         
         status_emoji = "✅" if active else "⏸️"
         role_text = "🔴 Super Admin" if role == 'super_admin' else "🔵 Admin"
+        
+        # Tarif ma'lumoti
+        if tariff_key in TARIFFS:
+            tariff_info = TARIFFS[tariff_key]
+            tariff_text = f"{tariff_info['name']}"
+        else:
+            tariff_text = "Custom"
         
         created_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d")
         
@@ -1215,22 +1226,30 @@ async def cmd_admins(m: Message):
         else:
             expiry_text = "♾️ Cheksiz"
         
-        groups_text = f"{len(managed_groups)} ta guruh" if managed_groups else "Barcha guruhlar"
+        # Guruh va limit ma'lumoti
+        current_groups = len(managed_groups)
+        if max_groups == -1:
+            groups_text = f"{current_groups} ta guruh (cheksiz limit)"
+        elif max_groups == 0:
+            groups_text = "0 ta guruh (limit yo'q)"
+        else:
+            groups_text = f"{current_groups}/{max_groups} ta guruh"
         
         lines.append(
             f"{status_emoji} <b>{name}</b> {role_text}\n"
             f"   ID: <code>{uid}</code>\n"
-            f"   Guruhlar: {groups_text}\n"
-            f"   Muddat: {expiry_text}\n"
-            f"   Qo'shilgan: {created_date}\n"
+            f"   📦 Tarif: {tariff_text}\n"
+            f"   📊 Guruhlar: {groups_text}\n"
+            f"   📅 Muddat: {expiry_text}\n"
+            f"   🕒 Qo'shilgan: {created_date}\n"
         )
     
     lines.append("\n💡 <b>Buyruqlar:</b>")
-    lines.append("➕ <code>/add_admin USER_ID MUDDATI</code>")
+    lines.append("➕ <code>/add_admin USER_ID TARIF</code>")
     lines.append("➖ <code>/remove_admin USER_ID</code>")
     lines.append("⏸️ <code>/pause_admin USER_ID</code>")
     lines.append("▶️ <code>/resume_admin USER_ID</code>")
-    lines.append("📅 <code>/extend_admin USER_ID MUDDATI</code>")
+    lines.append("📅 <code>/extend_admin USER_ID TARIF</code>")
     
     await m.answer("\n".join(lines), parse_mode="HTML")
 
@@ -1243,30 +1262,50 @@ async def cmd_add_admin(m: Message):
     try:
         parts = (m.text or "").split()
         if len(parts) < 3:
+            tariff_list = "\n".join([
+                f"• <code>{key}</code> - {info['name']} ({info['description']}, {info['price']:,} so'm)" 
+                for key, info in TARIFFS.items()
+            ])
             return await m.answer(
                 "❌ Noto'g'ri format!\n\n"
                 "To'g'ri format:\n"
-                "<code>/add_admin USER_ID MUDDATI</code>\n\n"
+                "<code>/add_admin USER_ID TARIF</code>\n\n"
+                f"<b>Mavjud tariflar:</b>\n{tariff_list}\n\n"
                 "Misol:\n"
-                "<code>/add_admin 123456789 30</code> - 30 kunlik admin\n"
-                "<code>/add_admin 123456789 0</code> - Cheksiz muddatli admin",
+                "<code>/add_admin 123456789 demo</code> - Demo tarif (7 kun, 1 guruh, BEPUL)\n"
+                "<code>/add_admin 123456789 oddiy</code> - Oddiy tarif (30 kun, 2 guruh, 50,000)\n"
+                "<code>/add_admin 123456789 premium</code> - Premium tarif (30 kun, cheksiz guruh, 150,000)",
                 parse_mode="HTML"
             )
         
         user_id = int(parts[1])
-        days = int(parts[2])
+        tariff_key = parts[2].lower()
         
         # Super admin bo'lsa
         if user_id in ADMIN_IDS:
             return await m.answer("❌ Bu foydalanuvchi allaqachon super admin!")
         
+        # Tarifni tekshirish
+        if tariff_key not in TARIFFS:
+            return await m.answer(
+                f"❌ Noto'g'ri tarif: <code>{tariff_key}</code>\n\n"
+                f"Mavjud tariflar: {', '.join(TARIFFS.keys())}",
+                parse_mode="HTML"
+            )
+        
+        tariff = TARIFFS[tariff_key]
+        
         # Muddatni hisoblash
-        if days > 0:
-            expires_at = int((datetime.utcnow() + timedelta(days=days)).timestamp())
-            expiry_text = f"{days} kun"
+        if tariff['days'] > 0:
+            expires_at = int((datetime.utcnow() + timedelta(days=tariff['days'])).timestamp())
+            expiry_text = f"{tariff['days']} kun"
         else:
             expires_at = None
             expiry_text = "Cheksiz"
+        
+        # Max groups
+        max_groups = tariff['max_groups']
+        groups_text = f"{max_groups} ta guruh" if max_groups > 0 else "Cheksiz guruh"
         
         # Foydalanuvchi ma'lumotlarini olish
         try:
@@ -1275,25 +1314,31 @@ async def cmd_add_admin(m: Message):
         except Exception:
             admin_name = f"User {user_id}"
         
-        # Admin qo'shish
+        # Admin qo'shish (boshida guruhlar bo'sh - super admin keyin tayinlaydi)
         await add_admin_to_db(
             user_id=user_id,
             name=admin_name,
             role='admin',
             created_by=m.from_user.id,
             expires_at=expires_at,
-            managed_groups=GROUP_IDS  # Barcha guruhlar
+            managed_groups=[],  # Boshida bo'sh - keyin super admin guruh tayinlaydi
+            max_groups=max_groups,
+            tariff=tariff_key
         )
         
         await m.answer(
             f"✅ <b>Admin muvaffaqiyatli qo'shildi!</b>\n\n"
             f"👤 Ism: {admin_name}\n"
             f"🆔 ID: <code>{user_id}</code>\n"
+            f"📦 Tarif: {tariff['name']}\n"
             f"📅 Muddat: {expiry_text}\n"
-            f"📚 Guruhlar: {len(GROUP_IDS)} ta guruh",
+            f"📊 Limit: {groups_text}\n"
+            f"💰 Narx: {tariff['price']:,} so'm\n\n"
+            f"⚠️ <b>Guruhlar hali tayinlanmagan!</b>\n"
+            f"Guruhlarni /groups buyrug'i orqali tayinlang.",
             parse_mode="HTML"
         )
-        logger.info(f"Super admin {m.from_user.id} added admin {user_id} with {days} days")
+        logger.info(f"Super admin {m.from_user.id} added admin {user_id} with tariff {tariff_key}")
         
         # Yangi adminga xabar yuborish
         try:
@@ -1301,8 +1346,10 @@ async def cmd_add_admin(m: Message):
                 user_id,
                 f"🎉 <b>Tabriklaymiz!</b>\n\n"
                 f"Siz admin sifatida tayinlandingiz!\n\n"
+                f"📦 Tarif: {tariff['name']}\n"
                 f"📅 Muddat: {expiry_text}\n"
-                f"📚 Boshqariladigan guruhlar: {len(GROUP_IDS)} ta\n\n"
+                f"📊 Guruh limiti: {groups_text}\n"
+                f"💰 Narx: {tariff['price']:,} so'm\n\n"
                 f"Bot'ga /start buyrug'ini yuboring.",
                 parse_mode="HTML"
             )
@@ -1310,7 +1357,7 @@ async def cmd_add_admin(m: Message):
             logger.warning(f"Could not notify new admin {user_id}: {e}")
         
     except ValueError:
-        await m.answer("❌ User ID va muddat raqam bo'lishi kerak!")
+        await m.answer("❌ User ID raqam bo'lishi kerak!")
     except Exception as e:
         logger.error(f"Error in cmd_add_admin: {e}")
         await m.answer(f"❌ Xatolik yuz berdi: {e}")
@@ -1458,52 +1505,191 @@ async def cmd_resume_admin(m: Message):
 
 @dp.message(Command("extend_admin"))
 async def cmd_extend_admin(m: Message):
-    """Admin muddatini uzaytirish (faqat super admin)."""
+    """Admin muddatini uzaytirish yoki yangi tarif berish (faqat super admin)."""
     if not is_super_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
     try:
         parts = (m.text or "").split()
         if len(parts) < 3:
+            tariff_list = "\n".join([
+                f"• <code>{key}</code> - {info['name']} ({info['days']} kun, {info['max_groups']} guruh)" 
+                for key, info in TARIFFS.items()
+            ])
             return await m.answer(
                 "❌ Noto'g'ri format!\n\n"
                 "To'g'ri format:\n"
-                "<code>/extend_admin USER_ID MUDDATI</code>\n\n"
+                "<code>/extend_admin USER_ID TARIF</code>\n\n"
+                f"<b>Mavjud tariflar:</b>\n{tariff_list}\n\n"
                 "Misol:\n"
-                "<code>/extend_admin 123456789 30</code> - 30 kunlik uzaytirish\n"
-                "<code>/extend_admin 123456789 0</code> - Cheksiz qilish",
+                "<code>/extend_admin 123456789 demo</code> - 7 kun qo'shish (demo)\n"
+                "<code>/extend_admin 123456789 oddiy</code> - 30 kun qo'shish (oddiy)",
                 parse_mode="HTML"
             )
         
         user_id = int(parts[1])
-        days = int(parts[2])
+        tariff_key = parts[2].lower()
         
         admin_info = await get_admin_info(user_id)
         if not admin_info:
             return await m.answer(f"❌ Admin topilmadi: <code>{user_id}</code>", parse_mode="HTML")
         
-        if days > 0:
-            new_expires_at = int((datetime.utcnow() + timedelta(days=days)).timestamp())
-            expiry_text = f"{days} kun"
+        # Tarifni tekshirish
+        if tariff_key not in TARIFFS:
+            return await m.answer(
+                f"❌ Noto'g'ri tarif: <code>{tariff_key}</code>\n\n"
+                f"Mavjud tariflar: {', '.join(TARIFFS.keys())}",
+                parse_mode="HTML"
+            )
+        
+        tariff = TARIFFS[tariff_key]
+        
+        # Muddatni uzaytirish (hozirgi vaqtdan)
+        if tariff['days'] > 0:
+            new_expires_at = int((datetime.utcnow() + timedelta(days=tariff['days'])).timestamp())
+            expiry_text = f"{tariff['days']} kun"
         else:
             new_expires_at = None
             expiry_text = "Cheksiz"
         
-        await extend_admin(user_id, new_expires_at)
+        # Admin ma'lumotlarini yangilash
+        await add_admin_to_db(
+            user_id=user_id,
+            name=admin_info['name'],
+            role=admin_info['role'],
+            created_by=m.from_user.id,
+            expires_at=new_expires_at,
+            managed_groups=admin_info['managed_groups'] or [],
+            max_groups=tariff['max_groups'],
+            tariff=tariff_key
+        )
         
         await m.answer(
-            f"📅 <b>Admin muddati uzaytirildi!</b>\n\n"
+            f"📅 <b>Admin muddati uzaytirildi va tarif yangilandi!</b>\n\n"
             f"🆔 ID: <code>{user_id}</code>\n"
             f"👤 Ism: {admin_info['name']}\n"
-            f"📅 Yangi muddat: {expiry_text}",
+            f"📦 Yangi tarif: {tariff['name']}\n"
+            f"📅 Muddat: {expiry_text}\n"
+            f"📊 Guruh limit: {tariff['max_groups']} ta",
             parse_mode="HTML"
         )
-        logger.info(f"Super admin {m.from_user.id} extended admin {user_id} by {days} days")
+        logger.info(f"Super admin {m.from_user.id} extended admin {user_id} with tariff {tariff_key}")
+        
+        # Admin'ga xabar yuborish
+        try:
+            await bot.send_message(
+                user_id,
+                f"✅ <b>Tarifingiz yangilandi!</b>\n\n"
+                f"📦 Tarif: {tariff['name']}\n"
+                f"📅 Muddat: {expiry_text}\n"
+                f"📊 Guruh limit: {tariff['max_groups']} ta\n"
+                f"💰 Narx: {tariff['price']:,} so'm",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify admin {user_id}: {e}")
         
     except ValueError:
-        await m.answer("❌ User ID va muddat raqam bo'lishi kerak!")
+        await m.answer("❌ User ID raqam bo'lishi kerak!")
     except Exception as e:
         logger.error(f"Error in cmd_extend_admin: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("assign_groups"))
+async def cmd_assign_groups(m: Message):
+    """Adminga guruhlar tayinlash (faqat super admin)."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split()
+        if len(parts) < 3:
+            # Mavjud guruhlarni ko'rsatish
+            if GROUP_IDS:
+                groups_list = "\n".join([f"• <code>{gid}</code>" for gid in GROUP_IDS])
+            else:
+                groups_list = "Guruhlar mavjud emas"
+            
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/assign_groups ADMIN_ID GROUP_ID1 GROUP_ID2 ...</code>\n\n"
+                f"<b>Mavjud guruhlar:</b>\n{groups_list}\n\n"
+                "Misol:\n"
+                "<code>/assign_groups 123456789 -1001234567890</code> - 1 ta guruh\n"
+                "<code>/assign_groups 123456789 -1001234567890 -1009876543210</code> - 2 ta guruh",
+                parse_mode="HTML"
+            )
+        
+        admin_id = int(parts[1])
+        group_ids_str = parts[2:]
+        
+        # Admin mavjudligini tekshirish
+        admin_info = await get_admin_info(admin_id)
+        if not admin_info:
+            return await m.answer(f"❌ Admin topilmadi: <code>{admin_id}</code>", parse_mode="HTML")
+        
+        # Guruh ID'larini parse qilish
+        group_ids = []
+        for gid_str in group_ids_str:
+            try:
+                gid = int(gid_str)
+                if gid not in GROUP_IDS:
+                    return await m.answer(f"❌ Guruh topilmadi: <code>{gid}</code>", parse_mode="HTML")
+                group_ids.append(gid)
+            except ValueError:
+                return await m.answer(f"❌ Noto'g'ri guruh ID: <code>{gid_str}</code>", parse_mode="HTML")
+        
+        # max_groups limitini tekshirish
+        max_groups = admin_info.get('max_groups', -1)
+        if max_groups > 0 and len(group_ids) > max_groups:
+            return await m.answer(
+                f"❌ <b>Guruh limiti oshib ketdi!</b>\n\n"
+                f"📊 Admin limiti: {max_groups} ta guruh\n"
+                f"❌ Siz tayinlashga uringan: {len(group_ids)} ta guruh\n\n"
+                f"Tarifni oshiring yoki kamroq guruh tayinlang.",
+                parse_mode="HTML"
+            )
+        
+        # Guruhlarni tayinlash
+        await add_admin_to_db(
+            user_id=admin_id,
+            name=admin_info['name'],
+            role=admin_info['role'],
+            created_by=m.from_user.id,
+            expires_at=admin_info['expires_at'],
+            managed_groups=group_ids,
+            max_groups=max_groups,
+            tariff=admin_info.get('tariff', 'custom')
+        )
+        
+        await m.answer(
+            f"✅ <b>Guruhlar muvaffaqiyatli tayinlandi!</b>\n\n"
+            f"🆔 Admin ID: <code>{admin_id}</code>\n"
+            f"👤 Ism: {admin_info['name']}\n"
+            f"📊 Tayinlangan guruhlar: {len(group_ids)}/{max_groups if max_groups > 0 else 'cheksiz'}\n"
+            f"🏷 Guruh ID'lar: {', '.join(map(str, group_ids))}",
+            parse_mode="HTML"
+        )
+        logger.info(f"Super admin {m.from_user.id} assigned {len(group_ids)} groups to admin {admin_id}")
+        
+        # Admin'ga xabar yuborish
+        try:
+            await bot.send_message(
+                admin_id,
+                f"✅ <b>Sizga guruhlar tayinlandi!</b>\n\n"
+                f"📊 Guruhlar soni: {len(group_ids)}\n"
+                f"🏷 Guruh ID'lar: {', '.join(map(str, group_ids))}\n\n"
+                f"Bot'da /start bosing!",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify admin {admin_id}: {e}")
+        
+    except ValueError:
+        await m.answer("❌ Admin ID va guruh ID'lar raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_assign_groups: {e}")
         await m.answer(f"❌ Xatolik yuz berdi: {e}")
 
 @dp.message(Command("edit_contract"))
