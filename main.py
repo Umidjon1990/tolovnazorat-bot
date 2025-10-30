@@ -866,22 +866,41 @@ async def cmd_start(m: Message):
             )
             return
         
-        # Guruh a'zoligini tekshirish (admin bo'lmaganlar uchun)
-        is_member = await is_member_of_any_group(m.from_user.id)
-        if not is_member:
-            # Guruh nomlarini olish
-            titles = dict(await resolve_group_titles())
-            group_names = [titles.get(gid, f"Guruh {gid}") for gid in GROUP_IDS]
-            groups_text = "\n".join([f"• {name}" for name in group_names])
+        # Guruh a'zoligini tekshirish va batafsil ma'lumot ko'rsatish
+        titles = dict(await resolve_group_titles())
+        
+        # Har bir guruhda a'zoligini real-time tekshirish
+        member_groups = []
+        non_member_groups = []
+        
+        for gid in GROUP_IDS:
+            try:
+                member = await bot.get_chat_member(gid, m.from_user.id)
+                if member.status in ['member', 'administrator', 'creator']:
+                    group_name = titles.get(gid, f"Guruh {gid}")
+                    member_groups.append(group_name)
+                else:
+                    group_name = titles.get(gid, f"Guruh {gid}")
+                    non_member_groups.append(group_name)
+            except Exception:
+                group_name = titles.get(gid, f"Guruh {gid}")
+                non_member_groups.append(group_name)
+        
+        # Agar hech qaysi guruhda bo'lmasa
+        if not member_groups:
+            groups_text = "\n".join([f"• {name}" for name in non_member_groups])
             
             await m.answer(
                 "⚠️ <b>Botdan foydalanish uchun avval guruhga qo'shilishingiz kerak!</b>\n\n"
-                f"📚 Guruhlar:\n{groups_text}\n\n"
+                f"📚 <b>Mavjud guruhlar:</b>\n{groups_text}\n\n"
                 "✅ Guruhga qo'shilganingizdan so'ng qaytadan /start bosing.",
                 parse_mode="HTML"
             )
             logger.info(f"User {m.from_user.id} is not a member of any group - registration blocked")
             return
+        
+        # Foydalanuvchiga qaysi guruhlarda ekanligini ko'rsatish
+        logger.info(f"User {m.from_user.id} is member of {len(member_groups)} group(s): {member_groups}")
         
         # Avval ro'yxatdan o'tganlarni tekshirish
         user_row = await get_user(m.from_user.id)
@@ -935,6 +954,10 @@ async def cmd_start(m: Message):
                     f"👤 Ism: {full_name}",
                     f"📞 Telefon: {phone or 'Belgilanmagan'}\n"
                 ]
+                
+                # Guruh a'zoligini ko'rsatish
+                if member_groups:
+                    lines.append(f"📍 <b>Siz a'zosisiz:</b> {', '.join(member_groups)}\n")
                 
                 for group_name, exp_str, days_left in active_subscriptions:
                     lines.append(f"🏷 <b>{group_name}</b>")
