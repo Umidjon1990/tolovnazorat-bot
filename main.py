@@ -819,6 +819,157 @@ async def cmd_add_user(m: Message):
         logger.error(f"Error in cmd_add_user: {e}")
         await m.answer(f"Xatolik yuz berdi: {str(e)}")
 
+@dp.message(Command("unregistered"))
+async def cmd_unregistered(m: Message):
+    """Guruhda obuna belgilanmagan foydalanuvchilarni ko'rsatish.
+    
+    Foydalanish:
+    - Guruhdagi barcha botga ma'lum userlarni tekshiradi
+    - Obuna yo'q yoki expires_at NULL bo'lganlarni ko'rsatadi
+    - Link orqali kirganlar va ro'yxatdan o'tmaganlarni aniqlaydi
+    """
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        processing_msg = await m.answer("⏳ Guruh a'zolari tekshirilmoqda...")
+        
+        now = int(datetime.utcnow().timestamp())
+        unregistered_users = []
+        
+        # Har bir guruhni tekshirish
+        titles = dict(await resolve_group_titles())
+        
+        for gid in GROUP_IDS:
+            # Database'dan guruhga tegishli barcha userlarni olish
+            async with db_pool.acquire() as conn:
+                # users jadvalidan barcha userlarni olish
+                all_db_users = await conn.fetch(
+                    "SELECT DISTINCT user_id, username, full_name, phone FROM users"
+                )
+                
+                # user_groups jadvalidan ham tekshirish
+                user_groups_data = await conn.fetch(
+                    "SELECT DISTINCT user_id FROM user_groups WHERE group_id = $1", gid
+                )
+            
+            # Database'dagi barcha user ID'larni yig'ish
+            db_user_ids = set()
+            for row in all_db_users:
+                db_user_ids.add(row['user_id'])
+            for row in user_groups_data:
+                db_user_ids.add(row['user_id'])
+            
+            # Har bir DB userini tekshirish
+            for user_id in db_user_ids:
+                # Guruhda mavjudligini tekshirish
+                try:
+                    member = await bot.get_chat_member(gid, user_id)
+                    if member.status not in ["member", "administrator", "creator"]:
+                        continue  # Guruhda emas
+                except Exception:
+                    continue  # API xatosi yoki guruhda emas
+                
+                # Obuna ma'lumotlarini olish
+                user_row = await get_user(user_id)
+                if not user_row:
+                    # Database'da mavjud emas - guruhda bor, lekin hech qachon ro'yxatdan o'tmagan
+                    username, fullname = await fetch_user_profile(user_id)
+                    unregistered_users.append({
+                        'user_id': user_id,
+                        'username': username,
+                        'fullname': fullname,
+                        'group_id': gid,
+                        'reason': "Database'da mavjud emas",
+                        'expires_at': None
+                    })
+                else:
+                    # Database'da bor, obuna holatini tekshirish
+                    expires_at = user_row[2] if len(user_row) > 2 else None
+                    username = user_row[3] if len(user_row) > 3 else None
+                    fullname = user_row[4] if len(user_row) > 4 else f"User{user_id}"
+                    phone = user_row[5] if len(user_row) > 5 else None
+                    
+                    # Obuna yo'q yoki tugagan
+                    if not expires_at or expires_at == 0:
+                        unregistered_users.append({
+                            'user_id': user_id,
+                            'username': username,
+                            'fullname': fullname,
+                            'group_id': gid,
+                            'phone': phone,
+                            'reason': 'Obuna belgilanmagan',
+                            'expires_at': None
+                        })
+                    elif expires_at < now:
+                        # Obuna tugagan
+                        exp_str, _ = human_left(expires_at)
+                        unregistered_users.append({
+                            'user_id': user_id,
+                            'username': username,
+                            'fullname': fullname,
+                            'group_id': gid,
+                            'phone': phone,
+                            'reason': f'Obuna tugagan ({exp_str})',
+                            'expires_at': expires_at
+                        })
+        
+        # Natijalarni ko'rsatish
+        if not unregistered_users:
+            await processing_msg.edit_text("✅ Barcha guruh a'zolarida aktiv obuna bor!")
+            return
+        
+        # Guruh bo'yicha guruhlash
+        groups_dict = {}
+        for user_info in unregistered_users:
+            gid = user_info['group_id']
+            if gid not in groups_dict:
+                groups_dict[gid] = []
+            groups_dict[gid].append(user_info)
+        
+        # Xabarni shakllantirish
+        await processing_msg.delete()
+        
+        header = f"⚠️ *OBUNA BELGILANMAGANLAR*\n\nJami: {len(unregistered_users)} ta\n"
+        await m.answer(header, parse_mode="Markdown")
+        
+        for gid, users_list in groups_dict.items():
+            gtitle = titles.get(gid, f"Guruh {gid}")
+            lines = [f"🏷 *{gtitle}* — {len(users_list)} ta\n"]
+            
+            for i, user_info in enumerate(users_list[:40], start=1):
+                name = user_info['fullname'] or f"User{user_info['user_id']}"
+                username = user_info['username']
+                user_tag = f"@{username}" if username else name
+                phone = user_info.get('phone', '')
+                phone_str = f" 📞 {phone}" if phone else ""
+                reason = user_info['reason']
+                
+                lines.append(f"{i}. {user_tag}{phone_str}")
+                lines.append(f"   • ID: `{user_info['user_id']}`")
+                lines.append(f"   • Holat: {reason}\n")
+            
+            if len(users_list) > 40:
+                lines.append(f"... va yana {len(users_list) - 40} ta")
+            
+            await m.answer("\n".join(lines), parse_mode="Markdown")
+        
+        # Yordam xabari
+        help_text = (
+            "💡 *Qanday qilib qo'shish mumkin?*\n\n"
+            "1️⃣ Har birini alohida:\n"
+            "   `/add_user USER_ID now`\n\n"
+            "2️⃣ Ularga bot orqali ro'yxatdan o'tishni aytish:\n"
+            "   Botga /start bosing va ma'lumotlaringizni kiriting"
+        )
+        await m.answer(help_text, parse_mode="Markdown")
+        
+        logger.info(f"Admin {m.from_user.id} checked unregistered users: {len(unregistered_users)} found")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_unregistered: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
 @dp.message(Command("stats"))
 async def cmd_stats(m: Message):
     if not is_admin(m.from_user.id):
