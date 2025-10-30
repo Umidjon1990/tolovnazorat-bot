@@ -3916,13 +3916,80 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
         except Exception as e:
             logger.warning(f"Failed to send warning to admin {aid}: {e}")
 
+async def send_expiry_warnings():
+    """2 kun ichida muddati tugaydigan adminlarga eslatma yuborish"""
+    try:
+        async with db_pool.acquire() as conn:
+            now = int(datetime.utcnow().timestamp())
+            warning_threshold = now + (2 * 24 * 60 * 60)  # 2 kun
+            
+            # 2 kun ichida expire bo'ladigan adminlarni topish
+            expiring_admins = await conn.fetch("""
+                SELECT user_id, name, expires_at, tariff, last_warning_sent_at FROM admins
+                WHERE active = TRUE 
+                  AND expires_at IS NOT NULL 
+                  AND expires_at > $1 
+                  AND expires_at < $2
+            """, now, warning_threshold)
+            
+            for row in expiring_admins:
+                uid = row['user_id']
+                name = row['name']
+                expires_at = row['expires_at']
+                tariff = row['tariff'] or 'custom'
+                last_warning = row['last_warning_sent_at']
+                
+                # Agar oxirgi warning 24 soatdan eski bo'lsa yoki hech yuborilmagan bo'lsa
+                if last_warning is None or (now - last_warning) > (24 * 60 * 60):
+                    exp_str, days_left = human_left(expires_at)
+                    
+                    # Admin'ga eslatma yuborish
+                    try:
+                        tariff_info = TARIFFS.get(tariff, {})
+                        await bot.send_message(
+                            uid,
+                            f"⏰ <b>Admin muddatingiz tugashiga {days_left} kun qoldi!</b>\n\n"
+                            f"📅 Tugash sanasi: {exp_str}\n"
+                            f"📦 Hozirgi tarif: {tariff_info.get('name', tariff)}\n\n"
+                            f"Davom ettirish uchun super admin bilan bog'laning yoki to'lov qiling.",
+                            parse_mode="HTML"
+                        )
+                        logger.info(f"Sent expiry warning to admin {uid} ({name}) - {days_left} days left")
+                    except Exception as e:
+                        logger.warning(f"Could not send warning to admin {uid}: {e}")
+                    
+                    # Super adminlarga xabar yuborish
+                    for super_admin_id in ADMIN_IDS:
+                        try:
+                            await bot.send_message(
+                                super_admin_id,
+                                f"⏰ <b>Admin muddati tugayapti!</b>\n\n"
+                                f"👤 Admin: {name}\n"
+                                f"🆔 ID: <code>{uid}</code>\n"
+                                f"📦 Tarif: {tariff_info.get('name', tariff)}\n"
+                                f"📅 Tugash: {exp_str}\n"
+                                f"⏳ Qolgan kun: {days_left}\n\n"
+                                f"Mijozga qo'ng'iroq qiling va to'lovni eslatib qo'ying!",
+                                parse_mode="HTML"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not notify super admin {super_admin_id}: {e}")
+                    
+                    # last_warning_sent_at ni yangilash
+                    await conn.execute("""
+                        UPDATE admins SET last_warning_sent_at = $1 WHERE user_id = $2
+                    """, now, uid)
+    
+    except Exception as e:
+        logger.error(f"Error in send_expiry_warnings: {e}")
+
 async def check_expired_admins():
     """Muddati tugagan adminlarni auto-deactivate qilish"""
     try:
         async with db_pool.acquire() as conn:
             now = int(datetime.utcnow().timestamp())
             expired_admins = await conn.fetch("""
-                SELECT user_id, name, expires_at FROM admins
+                SELECT user_id, name, expires_at, tariff FROM admins
                 WHERE active = TRUE AND expires_at IS NOT NULL AND expires_at < $1
             """, now)
             
@@ -3930,21 +3997,42 @@ async def check_expired_admins():
                 uid = row['user_id']
                 name = row['name']
                 expires_at = row['expires_at']
+                tariff = row['tariff'] or 'custom'
                 
                 await pause_admin(uid)
                 logger.info(f"Auto-deactivated admin {uid} ({name}) - expired at {expires_at}")
                 
+                # Admin'ga yakuniy xabar
                 try:
                     exp_str, _ = human_left(expires_at)
+                    tariff_info = TARIFFS.get(tariff, {})
                     await bot.send_message(
                         uid,
-                        f"⚠️ <b>Diqqat!</b>\n\n"
-                        f"Admin huquqlaringiz muddati tugadi ({exp_str}).\n\n"
-                        f"Davom ettirish uchun super admin bilan bog'laning.",
+                        f"⚠️ <b>Admin huquqlaringiz to'xtatildi!</b>\n\n"
+                        f"📅 Muddat tugash sanasi: {exp_str}\n"
+                        f"📦 Tarif edi: {tariff_info.get('name', tariff)}\n\n"
+                        f"Davom ettirish uchun super admin bilan bog'laning:\n"
+                        f"To'lov qiling va tarifni yangilang.",
                         parse_mode="HTML"
                     )
                 except Exception as e:
                     logger.warning(f"Could not notify expired admin {uid}: {e}")
+                
+                # Super adminlarga xabar yuborish
+                for super_admin_id in ADMIN_IDS:
+                    try:
+                        await bot.send_message(
+                            super_admin_id,
+                            f"⛔ <b>Admin muddati tugadi va to'xtatildi!</b>\n\n"
+                            f"👤 Admin: {name}\n"
+                            f"🆔 ID: <code>{uid}</code>\n"
+                            f"📦 Tarif: {tariff_info.get('name', tariff)}\n"
+                            f"📅 Tugagan sana: {exp_str}\n\n"
+                            f"Mijozga qo'ng'iroq qiling!",
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not notify super admin {super_admin_id}: {e}")
     
     except Exception as e:
         logger.error(f"Error in check_expired_admins: {e}")
@@ -3953,10 +4041,19 @@ async def auto_kick_loop():
     await asyncio.sleep(5)
     while True:
         try:
+            # Admin muddati tugashini tekshirish
             try:
                 await check_expired_admins()
             except Exception:
                 logger.exception("check_expired_admins failed")
+            
+            # Admin muddati tugashidan 2 kun oldin eslatma
+            try:
+                await send_expiry_warnings()
+            except Exception:
+                logger.exception("send_expiry_warnings failed")
+            
+            # O'quvchilar uchun eskisi
             try:
                 for uid, gid, exp_at in await soon_expiring_users(REMIND_DAYS):
                     await _warn_and_buttons(uid, gid, exp_at, reason="soon")
