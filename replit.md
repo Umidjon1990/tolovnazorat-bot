@@ -50,7 +50,8 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - `/groups` - List configured groups
   - `/stats` - Overall statistics
   - `/gstats` - Detailed group statistics
-  - `/add_user USER_ID [DATE]` - Manually add user to subscription (bugundan or YYYY-MM-DD)
+  - `/add_user USER_ID [DATE]` - Manually add single user to subscription (bugundan or YYYY-MM-DD)
+  - `/add_users ID1 ID2 ID3 ... [DATE]` - Bulk add multiple users with same date (YANGI!)
   - `/unregistered` - Show users in group without active subscription (link orqali kirganlar va ro'yxatdan o'tmaganlar)
   - `/bulk_add` - Info about Telegram API limitations for bulk registration
   - Payment approval and subscription management via inline buttons

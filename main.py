@@ -819,6 +819,149 @@ async def cmd_add_user(m: Message):
         logger.error(f"Error in cmd_add_user: {e}")
         await m.answer(f"Xatolik yuz berdi: {str(e)}")
 
+@dp.message(Command("add_users"))
+async def cmd_add_users(m: Message):
+    """Bir nechta foydalanuvchini bir vaqtda bir xil sana bilan qo'shish.
+    
+    Foydalanish:
+    - /add_users USER_ID1 USER_ID2 USER_ID3 ... [SANA]
+    
+    Misol:
+    - /add_users 123456789 987654321 555111222 now
+    - /add_users 123456789 987654321 2025-11-15
+    - /add_users 111 222 333 444 555 2025-12-01
+    """
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        # Parametrlarni parsing qilish
+        parts = m.text.split()
+        
+        if len(parts) < 3:
+            return await m.answer(
+                "❗ *Foydalanish:*\n\n"
+                "`/add_users USER_ID1 USER_ID2 ... [SANA]`\n\n"
+                "*Misollar:*\n"
+                "• `/add_users 123456789 987654321 now` - 2 ta user, bugundan\n"
+                "• `/add_users 111 222 333 2025-11-15` - 3 ta user, belgilangan sanadan\n"
+                "• `/add_users 111 222 333 444 555` - 5 ta user, bugundan",
+                parse_mode="Markdown"
+            )
+        
+        # Oxirgi element sana yoki "now" yoki user ID ekanligini aniqlash
+        last_part = parts[-1].strip().lower()
+        
+        # Sana parametrini ajratish
+        start_date = datetime.utcnow()
+        user_id_parts = parts[1:]  # /add_users ni o'tkazib yuborish
+        
+        if last_part == "now":
+            # Oxirgi "now" ni o'chirish
+            user_id_parts = user_id_parts[:-1]
+        elif DATE_RE.match(last_part.replace("/", "-")):
+            # Oxirgi qism sana
+            date_str = last_part.replace("/", "-")
+            try:
+                start_date = datetime.strptime(date_str, "%Y-%m-%d")
+                user_id_parts = user_id_parts[:-1]
+            except Exception:
+                return await m.answer("❗ Sana tushunilmadi. Misol: 2025-11-01")
+        # else: Oxirgi qism ham user ID, hamma narsa bugundan
+        
+        # User ID'larni parse qilish
+        user_ids = []
+        for part in user_id_parts:
+            try:
+                uid = int(part)
+                user_ids.append(uid)
+            except ValueError:
+                return await m.answer(f"❗ '{part}' user ID emas. Faqat raqamlar kiriting.")
+        
+        if not user_ids:
+            return await m.answer("❗ Kamida 1 ta user ID kiriting.")
+        
+        # Obuna tugash sanasini hisoblash
+        expires_at = int((start_date + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+        human_start = (start_date + TZ_OFFSET).strftime("%Y-%m-%d")
+        human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        
+        # Birinchi guruhni olish
+        if not GROUP_IDS:
+            return await m.answer("❗ Guruhlar topilmadi. PRIVATE_GROUP_ID ni sozlang.")
+        
+        primary_gid = GROUP_IDS[0]
+        
+        # Jarayonni boshlash
+        processing_msg = await m.answer(f"⏳ {len(user_ids)} ta foydalanuvchi qo'shilmoqda...")
+        
+        # Barcha userlarni qo'shish
+        added_users = []
+        failed_users = []
+        
+        for user_id in user_ids:
+            try:
+                # Foydalanuvchi ma'lumotlarini olish
+                username, fullname = await fetch_user_profile(user_id)
+                
+                # Database'ga qo'shish
+                await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
+                
+                # User'ga xabar yuborish (agar mumkin bo'lsa)
+                try:
+                    await bot.send_message(
+                        user_id,
+                        f"✅ *Tabriklaymiz! Obuna faollashtirildi!*\n\n"
+                        f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun\n"
+                        f"⏳ Tugash sanasi: {human_exp}\n\n"
+                        f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass  # Xabar yuborilmasa ham davom etamiz
+                
+                added_users.append((user_id, fullname))
+                logger.info(f"User {user_id} added via bulk add by admin {m.from_user.id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to add user {user_id}: {e}")
+                failed_users.append((user_id, str(e)))
+        
+        # Natijani ko'rsatish
+        await processing_msg.delete()
+        
+        # Muvaffaqiyatli qo'shilganlar
+        if added_users:
+            success_lines = [
+                f"✅ *{len(added_users)} TA FOYDALANUVCHI QO'SHILDI*\n",
+                f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun",
+                f"⏳ Tugash: {human_exp}",
+                f"🏷 Guruh: {primary_gid}\n"
+            ]
+            
+            for user_id, fullname in added_users[:20]:
+                success_lines.append(f"• {fullname or f'User{user_id}'} (ID: `{user_id}`)")
+            
+            if len(added_users) > 20:
+                success_lines.append(f"... va yana {len(added_users) - 20} ta")
+            
+            await m.answer("\n".join(success_lines), parse_mode="Markdown")
+        
+        # Xato bo'lganlar
+        if failed_users:
+            error_lines = [f"❌ *{len(failed_users)} TA XATOLIK*\n"]
+            for user_id, error in failed_users[:10]:
+                error_lines.append(f"• User {user_id}: {error}")
+            
+            if len(failed_users) > 10:
+                error_lines.append(f"... va yana {len(failed_users) - 10} ta")
+            
+            await m.answer("\n".join(error_lines), parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_add_users: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
 @dp.message(Command("unregistered"))
 async def cmd_unregistered(m: Message):
     """Guruhda obuna belgilanmagan foydalanuvchilarni ko'rsatish.
