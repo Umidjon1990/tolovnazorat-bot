@@ -533,34 +533,87 @@ async def cmd_start(m: Message):
         user_row = await get_user(m.from_user.id)
         
         if user_row:
-            # Foydalanuvchi database'da bor - obuna holatini tekshirish
+            # Foydalanuvchi database'da bor - barcha guruhlar bo'yicha obuna holatini tekshirish
             user_id, group_id, expires_at, username, full_name, phone, agreed_at = user_row
             now = int(datetime.utcnow().timestamp())
             
-            if expires_at and expires_at > now:
-                # Aktiv obuna bor
-                exp_str, days_left = human_left(expires_at)
-                await m.answer(
-                    f"✅ <b>Siz allaqachon obuna rejimidasiz!</b>\n\n"
-                    f"👤 Ism: {full_name}\n"
-                    f"📞 Telefon: {phone or 'Belgilanmagan'}\n\n"
-                    f"📅 Obuna tugash sanasi: {exp_str}\n"
-                    f"⏳ Qolgan vaqt: {days_left} kun\n\n"
-                    f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
-                    parse_mode="HTML"
+            # Barcha guruhlar bo'yicha obuna holatini olish
+            async with db_pool.acquire() as conn:
+                user_groups_rows = await conn.fetch(
+                    "SELECT group_id, expires_at FROM user_groups WHERE user_id = $1", 
+                    m.from_user.id
                 )
-                logger.info(f"User {m.from_user.id} already has active subscription - expires at {exp_str}")
+            
+            # Guruh nomlarini olish
+            titles = dict(await resolve_group_titles())
+            
+            active_subscriptions = []
+            expired_subscriptions = []
+            
+            # Asosiy guruhni tekshirish (users jadvalidan)
+            if expires_at and expires_at > now:
+                exp_str, days_left = human_left(expires_at)
+                group_name = titles.get(group_id, f"Guruh {group_id}")
+                active_subscriptions.append((group_name, exp_str, days_left))
+            elif expires_at:
+                exp_str, days_left = human_left(expires_at)
+                group_name = titles.get(group_id, f"Guruh {group_id}")
+                expired_subscriptions.append((group_name, exp_str))
+            
+            # Qo'shimcha guruhlarni tekshirish (user_groups jadvalidan)
+            for row in user_groups_rows:
+                gid = row['group_id']
+                exp = row['expires_at']
+                
+                if exp and exp > now:
+                    exp_str, days_left = human_left(exp)
+                    group_name = titles.get(gid, f"Guruh {gid}")
+                    active_subscriptions.append((group_name, exp_str, days_left))
+                elif exp:
+                    exp_str, days_left = human_left(exp)
+                    group_name = titles.get(gid, f"Guruh {gid}")
+                    expired_subscriptions.append((group_name, exp_str))
+            
+            # Natijalarni ko'rsatish
+            if active_subscriptions:
+                lines = [
+                    f"✅ <b>Sizning obunalaringiz:</b>\n",
+                    f"👤 Ism: {full_name}",
+                    f"📞 Telefon: {phone or 'Belgilanmagan'}\n"
+                ]
+                
+                for group_name, exp_str, days_left in active_subscriptions:
+                    lines.append(f"🏷 <b>{group_name}</b>")
+                    lines.append(f"   📅 Tugash: {exp_str}")
+                    lines.append(f"   ⏳ Qolgan: {days_left} kun\n")
+                
+                if expired_subscriptions:
+                    lines.append("\n⚠️ <b>Muddati tugagan obunalar:</b>\n")
+                    for group_name, exp_str in expired_subscriptions:
+                        lines.append(f"🏷 {group_name} - Tugagan: {exp_str}")
+                
+                lines.append("\n🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!")
+                
+                await m.answer("\n".join(lines), parse_mode="HTML")
+                logger.info(f"User {m.from_user.id} has {len(active_subscriptions)} active subscription(s)")
                 return
             else:
-                # Obuna tugagan yoki yo'q
-                await m.answer(
-                    f"⚠️ <b>Obuna muddati tugagan</b>\n\n"
-                    f"👤 Ism: {full_name}\n"
-                    f"📞 Telefon: {phone or 'Belgilanmagan'}\n\n"
-                    f"📝 Obunani yangilash uchun admin bilan bog'laning yoki qayta ro'yxatdan o'ting.",
-                    parse_mode="HTML"
-                )
-                logger.info(f"User {m.from_user.id} has expired subscription")
+                # Hech qaysi guruhda aktiv obuna yo'q
+                lines = [
+                    f"⚠️ <b>Hech qaysi guruhda aktiv obuna yo'q</b>\n",
+                    f"👤 Ism: {full_name}",
+                    f"📞 Telefon: {phone or 'Belgilanmagan'}\n"
+                ]
+                
+                if expired_subscriptions:
+                    lines.append("⏰ <b>Muddati tugagan obunalar:</b>\n")
+                    for group_name, exp_str in expired_subscriptions:
+                        lines.append(f"🏷 {group_name} - Tugagan: {exp_str}")
+                
+                lines.append("\n📝 Obunani yangilash uchun admin bilan boglaning.")
+                
+                await m.answer("\n".join(lines), parse_mode="HTML")
+                logger.info(f"User {m.from_user.id} has no active subscriptions")
                 return
         
         # Yangi foydalanuvchi - ro'yxatdan o'tish jarayoni
