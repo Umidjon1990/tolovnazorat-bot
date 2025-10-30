@@ -448,6 +448,17 @@ async def send_one_time_link(group_id: int, user_id: int) -> str:
 def is_admin(uid: int) -> bool:
     return uid in ADMIN_IDS
 
+async def is_member_of_any_group(uid: int) -> bool:
+    """Foydalanuvchi kamida bitta guruhda ekanligini tekshirish."""
+    for group_id in GROUP_IDS:
+        try:
+            member = await bot.get_chat_member(group_id, uid)
+            if member.status in ["member", "administrator", "creator"]:
+                return True
+        except Exception:
+            continue
+    return False
+
 async def fetch_user_profile(uid: int) -> tuple[str, str]:
     try:
         ch = await bot.get_chat(uid)
@@ -567,6 +578,23 @@ async def cmd_start(m: Message):
                 reply_markup=admin_reply_keyboard(),
                 parse_mode="Markdown"
             )
+            return
+        
+        # Guruh a'zoligini tekshirish (admin bo'lmaganlar uchun)
+        is_member = await is_member_of_any_group(m.from_user.id)
+        if not is_member:
+            # Guruh nomlarini olish
+            titles = dict(await resolve_group_titles())
+            group_names = [titles.get(gid, f"Guruh {gid}") for gid in GROUP_IDS]
+            groups_text = "\n".join([f"• {name}" for name in group_names])
+            
+            await m.answer(
+                "⚠️ <b>Botdan foydalanish uchun avval guruhga qo'shilishingiz kerak!</b>\n\n"
+                f"📚 Guruhlar:\n{groups_text}\n\n"
+                "✅ Guruhga qo'shilganingizdan so'ng qaytadan /start bosing.",
+                parse_mode="HTML"
+            )
+            logger.info(f"User {m.from_user.id} is not a member of any group - registration blocked")
             return
         
         # Avval ro'yxatdan o'tganlarni tekshirish
@@ -1867,6 +1895,18 @@ async def on_admin_date_handler(m: Message):
     # Ism-familiya qabul qilish (yangi ro'yxatdan o'tish tizimi)
     if m.from_user.id in WAIT_FULLNAME_FOR:
         try:
+            # Guruh a'zoligini qayta tekshirish
+            if not is_admin(m.from_user.id):
+                is_member = await is_member_of_any_group(m.from_user.id)
+                if not is_member:
+                    WAIT_FULLNAME_FOR.discard(m.from_user.id)
+                    await m.answer(
+                        "⚠️ <b>Kechirasiz, siz hozir guruh a'zosi emassiz.</b>\n\n"
+                        "Botdan foydalanish uchun avval guruhga qo'shiling va qaytadan /start bosing.",
+                        parse_mode="HTML"
+                    )
+                    return
+            
             fullname = (m.text or "").strip()
             if len(fullname) < 3:
                 return await m.answer("❗ Iltimos, to'liq ismingizni kiriting (kamida 3 ta harf)")
@@ -2017,6 +2057,18 @@ async def on_admin_date_handler(m: Message):
         return
     
     if m.from_user.id in WAIT_CONTACT_FOR:
+        # Guruh a'zoligini qayta tekshirish
+        if not is_admin(m.from_user.id):
+            is_member = await is_member_of_any_group(m.from_user.id)
+            if not is_member:
+                WAIT_CONTACT_FOR.discard(m.from_user.id)
+                await m.answer(
+                    "⚠️ <b>Kechirasiz, siz hozir guruh a'zosi emassiz.</b>\n\n"
+                    "Botdan foydalanish uchun avval guruhga qo'shiling va qaytadan /start bosing.",
+                    parse_mode="HTML"
+                )
+                return
+        
         phone_pattern = re.compile(r"^\+?\d{9,15}$")
         if phone_pattern.match((m.text or "").strip()):
             try:
