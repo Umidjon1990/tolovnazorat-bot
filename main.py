@@ -53,6 +53,45 @@ SUBSCRIPTION_DAYS = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
 INVITE_LINK_EXPIRE_HOURS = int(os.getenv("INVITE_LINK_EXPIRE_HOURS", "72"))  # 3 kun = 72 soat
 REMIND_DAYS = int(os.getenv("REMIND_DAYS", "3"))
 
+# Tarif konfiguratsiyasi
+TARIFFS = {
+    "demo": {
+        "name": "🎁 Demo",
+        "days": 7,
+        "max_groups": 1,
+        "price": 0,
+        "description": "1 hafta, 1 ta guruh, BEPUL"
+    },
+    "oddiy": {
+        "name": "📦 Oddiy",
+        "days": 30,
+        "max_groups": 2,
+        "price": 50000,
+        "description": "1 oy, 2 ta guruh"
+    },
+    "pro": {
+        "name": "🚀 Pro",
+        "days": 30,
+        "max_groups": 4,
+        "price": 75000,
+        "description": "1 oy, 4 ta guruh"
+    },
+    "gold": {
+        "name": "💎 GOLD",
+        "days": 30,
+        "max_groups": 5,
+        "price": 100000,
+        "description": "1 oy, 5 ta guruh"
+    },
+    "premium": {
+        "name": "👑 Premium",
+        "days": 30,
+        "max_groups": -1,  # -1 = cheksiz
+        "price": 150000,
+        "description": "1 oy, cheksiz guruh"
+    }
+}
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable not found. Please set it in .env file")
