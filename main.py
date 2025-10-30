@@ -207,25 +207,37 @@ async def db_init():
             
             # Migration: Environment variable'dan database'ga guruhlarni ko'chirish
             groups_count = await conn.fetchval("SELECT COUNT(*) FROM groups")
-            if groups_count == 0 and os.getenv("PRIVATE_GROUP_ID"):
-                # Eski PRIVATE_GROUP_ID'ni database'ga ko'chirish
-                try:
-                    old_group_id = int(os.getenv("PRIVATE_GROUP_ID"))
-                    now = int(datetime.utcnow().timestamp())
-                    await conn.execute("""
-                        INSERT INTO groups(group_id, name, created_at)
-                        VALUES($1, $2, $3)
-                    """, old_group_id, "Asosiy guruh", now)
-                    logger.info(f"Migrated PRIVATE_GROUP_ID ({old_group_id}) to database")
-                except ValueError:
-                    logger.warning("PRIVATE_GROUP_ID is not a valid integer, skipping migration")
+            if groups_count == 0 and GROUP_IDS:
+                # Eski PRIVATE_GROUP_ID'dan allaqachon parselangan GROUP_IDS'ni database'ga ko'chirish
+                # Bu vergul bilan ajratilgan ko'p guruhlarni ham qo'llab-quvvatlaydi
+                now = int(datetime.utcnow().timestamp())
+                migrated_count = 0
+                for idx, gid in enumerate(GROUP_IDS, start=1):
+                    try:
+                        # Har bir guruhni database'ga qo'shish
+                        name = f"Guruh #{idx}" if len(GROUP_IDS) > 1 else "Asosiy guruh"
+                        await conn.execute("""
+                            INSERT INTO groups(group_id, name, created_at)
+                            VALUES($1, $2, $3)
+                            ON CONFLICT(group_id) DO NOTHING
+                        """, gid, name, now)
+                        migrated_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to migrate group {gid}: {e}")
+                
+                if migrated_count > 0:
+                    logger.info(f"Migrated {migrated_count} group(s) from PRIVATE_GROUP_ID to database")
             
             # GROUP_IDS ni database'dan yuklash
-            GROUP_IDS = await load_groups_from_db()
-            if GROUP_IDS:
+            db_groups = await load_groups_from_db()
+            if db_groups:
+                GROUP_IDS = db_groups
                 logger.info(f"Loaded {len(GROUP_IDS)} group(s) from database: {GROUP_IDS}")
+            elif GROUP_IDS:
+                # Agar database bo'sh bo'lsa lekin environment variable'da guruhlar bo'lsa, ularni saqlash
+                logger.warning(f"Database has no groups, keeping {len(GROUP_IDS)} from environment variable")
             else:
-                logger.warning("No groups found in database - bot may not function properly")
+                logger.warning("No groups found in database or environment - bot may not function properly")
                 
         logger.info("PostgreSQL database initialized successfully")
     except Exception as e:
