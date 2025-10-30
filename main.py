@@ -164,6 +164,12 @@ CREATE TABLE IF NOT EXISTS contract_templates(
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS groups(
+    id SERIAL PRIMARY KEY,
+    group_id BIGINT UNIQUE NOT NULL,
+    name TEXT,
+    created_at BIGINT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_id);
 CREATE INDEX IF NOT EXISTS idx_users_expires ON users(expires_at);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
@@ -174,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_ug_expires ON user_groups(expires_at);
 """
 
 async def db_init():
-    global db_pool
+    global db_pool, GROUP_IDS
     try:
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
         async with db_pool.acquire() as conn:
@@ -198,6 +204,28 @@ async def db_init():
                     VALUES($1, $2, $3)
                 """, CONTRACT_TEXT, now, now)
                 logger.info("Default contract template inserted")
+            
+            # Migration: Environment variable'dan database'ga guruhlarni ko'chirish
+            groups_count = await conn.fetchval("SELECT COUNT(*) FROM groups")
+            if groups_count == 0 and os.getenv("PRIVATE_GROUP_ID"):
+                # Eski PRIVATE_GROUP_ID'ni database'ga ko'chirish
+                try:
+                    old_group_id = int(os.getenv("PRIVATE_GROUP_ID"))
+                    now = int(datetime.utcnow().timestamp())
+                    await conn.execute("""
+                        INSERT INTO groups(group_id, name, created_at)
+                        VALUES($1, $2, $3)
+                    """, old_group_id, "Asosiy guruh", now)
+                    logger.info(f"Migrated PRIVATE_GROUP_ID ({old_group_id}) to database")
+                except ValueError:
+                    logger.warning("PRIVATE_GROUP_ID is not a valid integer, skipping migration")
+            
+            # GROUP_IDS ni database'dan yuklash
+            GROUP_IDS = await load_groups_from_db()
+            if GROUP_IDS:
+                logger.info(f"Loaded {len(GROUP_IDS)} group(s) from database: {GROUP_IDS}")
+            else:
+                logger.warning("No groups found in database - bot may not function properly")
                 
         logger.info("PostgreSQL database initialized successfully")
     except Exception as e:
@@ -272,6 +300,32 @@ async def update_contract_template(new_text: str):
             INSERT INTO contract_templates(template_text, created_at, updated_at)
             VALUES($1, $2, $3)
         """, new_text, now, now)
+
+async def load_groups_from_db() -> list[int]:
+    """Database'dan guruhlar ro'yxatini yuklash."""
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT group_id FROM groups ORDER BY id")
+        return [row['group_id'] for row in rows]
+
+async def add_group_to_db(group_id: int, name: Optional[str] = None):
+    """Yangi guruh qo'shish."""
+    now = int(datetime.utcnow().timestamp())
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO groups(group_id, name, created_at)
+            VALUES($1, $2, $3)
+            ON CONFLICT(group_id) DO UPDATE SET name=EXCLUDED.name
+        """, group_id, name, now)
+
+async def remove_group_from_db(group_id: int):
+    """Guruhni o'chirish."""
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM groups WHERE group_id=$1", group_id)
+
+async def get_all_groups():
+    """Barcha guruhlarni olish."""
+    async with db_pool.acquire() as conn:
+        return await conn.fetch("SELECT id, group_id, name, created_at FROM groups ORDER BY id")
 
 async def clear_user_group(uid: int, gid: int):
     async with db_pool.acquire() as conn:
@@ -790,13 +844,128 @@ async def cmd_expiring(m: Message):
 
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
+    """Barcha guruhlarni ko'rsatish (database'dan)."""
     if not is_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
-    if not GROUP_IDS:
-        return await m.answer("PRIVATE_GROUP_ID bo'sh. Secrets'ga kiriting.")
-    rows = await resolve_group_titles()
-    txt = "🔗 Ulangan guruhlar:\n" + "\n".join([f"• {t} — {gid}" for gid, t in rows])
-    await m.answer(txt)
+    
+    groups = await get_all_groups()
+    if not groups:
+        return await m.answer(
+            "❌ Hozircha guruhlar mavjud emas.\n\n"
+            "➕ Yangi guruh qo'shish:\n"
+            "<code>/add_group GROUP_ID [Guruh nomi]</code>",
+            parse_mode="HTML"
+        )
+    
+    lines = ["🔗 <b>Ulangan guruhlar:</b>\n"]
+    for row in groups:
+        gid = row['group_id']
+        name = row['name'] or "Nomsiz"
+        created_at = row['created_at']
+        created_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        lines.append(f"• <b>{name}</b>\n   ID: <code>{gid}</code>\n   Qo'shilgan: {created_date}\n")
+    
+    lines.append("\n💡 Buyruqlar:")
+    lines.append("➕ <code>/add_group GROUP_ID [Guruh nomi]</code>")
+    lines.append("➖ <code>/remove_group GROUP_ID</code>")
+    
+    await m.answer("\n".join(lines), parse_mode="HTML")
+
+@dp.message(Command("add_group"))
+async def cmd_add_group(m: Message):
+    """Yangi guruh qo'shish."""
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split(maxsplit=2)
+        if len(parts) < 2:
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/add_group -1001234567890 [Guruh nomi]</code>\n\n"
+                "Misol:\n"
+                "<code>/add_group -1001234567890 Python kursi</code>",
+                parse_mode="HTML"
+            )
+        
+        group_id = int(parts[1])
+        name = parts[2] if len(parts) > 2 else None
+        
+        # Guruhni database'ga qo'shish
+        await add_group_to_db(group_id, name)
+        
+        # GROUP_IDS ni yangilash
+        global GROUP_IDS
+        GROUP_IDS = await load_groups_from_db()
+        
+        # Guruh nomini olish (Telegram API orqali)
+        try:
+            chat = await bot.get_chat(group_id)
+            actual_name = chat.title or name or "Nomsiz"
+            # Agar nom kiritilmagan bo'lsa, Telegram'dan olingan nomni saqlash
+            if not name:
+                await add_group_to_db(group_id, actual_name)
+        except Exception:
+            actual_name = name or "Nomsiz"
+        
+        await m.answer(
+            f"✅ <b>Guruh muvaffaqiyatli qo'shildi!</b>\n\n"
+            f"📚 Guruh: {actual_name}\n"
+            f"🆔 ID: <code>{group_id}</code>\n\n"
+            f"🔢 Jami guruhlar: {len(GROUP_IDS)}",
+            parse_mode="HTML"
+        )
+        logger.info(f"Admin {m.from_user.id} added group {group_id} ({actual_name})")
+        
+    except ValueError:
+        await m.answer("❌ Guruh ID raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_add_group: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("remove_group"))
+async def cmd_remove_group(m: Message):
+    """Guruhni o'chirish."""
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split()
+        if len(parts) < 2:
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/remove_group -1001234567890</code>",
+                parse_mode="HTML"
+            )
+        
+        group_id = int(parts[1])
+        
+        # Guruh mavjudligini tekshirish
+        if group_id not in GROUP_IDS:
+            return await m.answer(f"❌ Guruh topilmadi: <code>{group_id}</code>", parse_mode="HTML")
+        
+        # Guruhni database'dan o'chirish
+        await remove_group_from_db(group_id)
+        
+        # GROUP_IDS ni yangilash
+        global GROUP_IDS
+        GROUP_IDS = await load_groups_from_db()
+        
+        await m.answer(
+            f"✅ <b>Guruh muvaffaqiyatli o'chirildi!</b>\n\n"
+            f"🆔 ID: <code>{group_id}</code>\n\n"
+            f"🔢 Qolgan guruhlar: {len(GROUP_IDS)}",
+            parse_mode="HTML"
+        )
+        logger.info(f"Admin {m.from_user.id} removed group {group_id}")
+        
+    except ValueError:
+        await m.answer("❌ Guruh ID raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_remove_group: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
 
 @dp.message(Command("edit_contract"))
 async def cmd_edit_contract(m: Message):
