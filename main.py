@@ -489,7 +489,7 @@ async def on_chat_member_updated(event: ChatMemberUpdated):
                 f"👋 Salom {user_mention}!\n\n"
                 f"🎓 Guruhga xush kelibsiz!\n\n"
                 f"📝 Obuna rejimiga o'tish uchun ro'yxatdan o'ting:\n"
-                f"👉 Mening private chatimda /start bosing: @{bot_username}\n\n"
+                f"👉 Mening private chatimda start bosing: @{bot_username}\n\n"
                 f"✅ Ism-familiya va telefon raqamingizni yuboring"
             )
             
@@ -529,14 +529,48 @@ async def cmd_start(m: Message):
             )
             return
         
-        # Oddiy foydalanuvchilar uchun - ism-familiya so'rash
+        # Avval ro'yxatdan o'tganlarni tekshirish
+        user_row = await get_user(m.from_user.id)
+        
+        if user_row:
+            # Foydalanuvchi database'da bor - obuna holatini tekshirish
+            user_id, group_id, expires_at, username, full_name, phone, agreed_at = user_row
+            now = int(datetime.utcnow().timestamp())
+            
+            if expires_at and expires_at > now:
+                # Aktiv obuna bor
+                exp_str, days_left = human_left(expires_at)
+                await m.answer(
+                    f"✅ <b>Siz allaqachon obuna rejimidasiz!</b>\n\n"
+                    f"👤 Ism: {full_name}\n"
+                    f"📞 Telefon: {phone or 'Belgilanmagan'}\n\n"
+                    f"📅 Obuna tugash sanasi: {exp_str}\n"
+                    f"⏳ Qolgan vaqt: {days_left} kun\n\n"
+                    f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
+                    parse_mode="HTML"
+                )
+                logger.info(f"User {m.from_user.id} already has active subscription - expires at {exp_str}")
+                return
+            else:
+                # Obuna tugagan yoki yo'q
+                await m.answer(
+                    f"⚠️ <b>Obuna muddati tugagan</b>\n\n"
+                    f"👤 Ism: {full_name}\n"
+                    f"📞 Telefon: {phone or 'Belgilanmagan'}\n\n"
+                    f"📝 Obunani yangilash uchun admin bilan bog'laning yoki qayta ro'yxatdan o'ting.",
+                    parse_mode="HTML"
+                )
+                logger.info(f"User {m.from_user.id} has expired subscription")
+                return
+        
+        # Yangi foydalanuvchi - ro'yxatdan o'tish jarayoni
         WAIT_FULLNAME_FOR.add(m.from_user.id)
         
         await m.answer(
-            "👋 *Xush kelibsiz!*\n\n"
-            "📝 Iltimos, *to'liq ismingizni* (Ism Familiya) kiriting:\n\n"
+            "👋 <b>Xush kelibsiz!</b>\n\n"
+            "📝 Iltimos, <b>to'liq ismingizni</b> (Ism Familiya) kiriting:\n\n"
             "Misol: Ali Valiyev",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
         logger.info(f"User {m.from_user.id} started registration - waiting for fullname")
