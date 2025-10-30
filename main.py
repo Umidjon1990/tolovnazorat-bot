@@ -627,6 +627,7 @@ def admin_reply_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
             [KeyboardButton(text="✅ Tasdiqlangan to'lovlar"), KeyboardButton(text="⏳ Kutilayotgan to'lovlar")],
+            [KeyboardButton(text="➕ Guruh qo'shish"), KeyboardButton(text="📝 Shartnoma tahrirlash")],
             [KeyboardButton(text="🧹 Tozalash")]
         ],
         resize_keyboard=True,
@@ -2046,6 +2047,61 @@ async def admin_cleanup_button(m: Message):
     except Exception as e:
         logger.error(f"Error in admin_cleanup_button: {e}")
         await m.answer("Xatolik yuz berdi")
+
+@dp.message(F.text == "➕ Guruh qo'shish")
+async def admin_add_group_button(m: Message):
+    """Admin Guruh qo'shish tugmasi handleri."""
+    if not is_admin(m.from_user.id):
+        return
+    
+    await m.answer(
+        "➕ <b>Guruh qo'shish</b>\n\n"
+        "Guruh qo'shish uchun quyidagi buyruqni yuboring:\n\n"
+        "<code>/add_group GURUH_ID [Guruh nomi]</code>\n\n"
+        "<b>Misol:</b>\n"
+        "<code>/add_group -1001234567890 Python kursi</code>\n\n"
+        "💡 <b>Guruh ID'ni qanday topish mumkin?</b>\n"
+        "1️⃣ Guruhga botni qo'shing\n"
+        "2️⃣ Guruhda /myid buyrug'ini yuboring\n"
+        "3️⃣ Bot guruh ID'ni ko'rsatadi",
+        parse_mode="HTML"
+    )
+
+@dp.message(F.text == "📝 Shartnoma tahrirlash")
+async def admin_edit_contract_button(m: Message):
+    """Admin Shartnoma tahrirlash tugmasi handleri."""
+    if not is_admin(m.from_user.id):
+        return
+    
+    try:
+        # Hozirgi shartnoma matnini olish
+        contract_text = await get_contract_template()
+        
+        # Shartnoma matnini .txt file sifatida yuborish
+        txt_bytes = contract_text.encode('utf-8')
+        txt_file = BufferedInputFile(txt_bytes, filename="shartnoma.txt")
+        
+        await m.answer_document(
+            txt_file,
+            caption=(
+                "📄 <b>Hozirgi shartnoma matni</b>\n\n"
+                "📝 Shartnomani tahrirlash uchun:\n"
+                "1️⃣ Yangi matnni xabar sifatida yuboring\n"
+                "2️⃣ Yoki yangi .txt faylini yuklang\n\n"
+                "💡 Shablonlar:\n"
+                "• <code>{name}</code> - To'liq ism\n"
+                "• <code>{phone}</code> - Telefon raqam\n"
+                "• <code>{date}</code> - Sana"
+            ),
+            parse_mode="HTML"
+        )
+        
+        # Tahrirlash rejimini yoqish
+        WAIT_CONTRACT_EDIT.add(m.from_user.id)
+        
+    except Exception as e:
+        logger.error(f"Error in admin_edit_contract_button: {e}")
+        await m.answer(f"❌ Xatolik: {e}")
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
