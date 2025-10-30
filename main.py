@@ -170,6 +170,17 @@ CREATE TABLE IF NOT EXISTS groups(
     name TEXT,
     created_at BIGINT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS admins(
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT UNIQUE NOT NULL,
+    name TEXT,
+    role TEXT NOT NULL DEFAULT 'admin',
+    active BOOLEAN DEFAULT TRUE,
+    created_at BIGINT NOT NULL,
+    expires_at BIGINT,
+    created_by BIGINT,
+    managed_groups BIGINT[]
+);
 CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_id);
 CREATE INDEX IF NOT EXISTS idx_users_expires ON users(expires_at);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
@@ -177,6 +188,9 @@ CREATE INDEX IF NOT EXISTS idx_pay_status_created ON payments(status, created_at
 CREATE INDEX IF NOT EXISTS idx_ug_user ON user_groups(user_id);
 CREATE INDEX IF NOT EXISTS idx_ug_group ON user_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_ug_expires ON user_groups(expires_at);
+CREATE INDEX IF NOT EXISTS idx_admins_user ON admins(user_id);
+CREATE INDEX IF NOT EXISTS idx_admins_active ON admins(active);
+CREATE INDEX IF NOT EXISTS idx_admins_expires ON admins(expires_at);
 """
 
 async def db_init():
@@ -514,6 +528,95 @@ async def send_one_time_link(group_id: int, user_id: int) -> str:
 def is_admin(uid: int) -> bool:
     return uid in ADMIN_IDS
 
+def is_super_admin(uid: int) -> bool:
+    """Super admin tekshirish (ADMIN_IDS'da bo'lganlar)"""
+    return uid in ADMIN_IDS
+
+async def is_active_admin(uid: int) -> bool:
+    """Faol admin yoki super admin tekshirish (database + ADMIN_IDS)"""
+    if uid in ADMIN_IDS:
+        return True
+    
+    try:
+        async with db_pool.acquire() as conn:
+            now = int(datetime.utcnow().timestamp())
+            row = await conn.fetchrow("""
+                SELECT active, expires_at FROM admins 
+                WHERE user_id = $1
+            """, uid)
+            
+            if not row:
+                return False
+            
+            if not row['active']:
+                return False
+            
+            if row['expires_at'] and row['expires_at'] < now:
+                return False
+            
+            return True
+    except Exception as e:
+        logger.error(f"Error checking active admin {uid}: {e}")
+        return False
+
+async def get_admin_info(uid: int):
+    """Admin ma'lumotlarini olish"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow("""
+            SELECT * FROM admins WHERE user_id = $1
+        """, uid)
+
+async def add_admin_to_db(user_id: int, name: str, role: str, created_by: int, expires_at: Optional[int] = None, managed_groups: Optional[list[int]] = None):
+    """Yangi admin qo'shish"""
+    async with db_pool.acquire() as conn:
+        now = int(datetime.utcnow().timestamp())
+        await conn.execute("""
+            INSERT INTO admins(user_id, name, role, active, created_at, expires_at, created_by, managed_groups)
+            VALUES($1, $2, $3, TRUE, $4, $5, $6, $7)
+            ON CONFLICT(user_id) DO UPDATE SET
+                name = $2,
+                role = $3,
+                active = TRUE,
+                expires_at = $5,
+                managed_groups = $7
+        """, user_id, name, role, now, expires_at, created_by, managed_groups or [])
+
+async def remove_admin_from_db(user_id: int):
+    """Adminni o'chirish"""
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM admins WHERE user_id = $1", user_id)
+
+async def pause_admin(user_id: int):
+    """Adminni to'xtatish"""
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE admins SET active = FALSE WHERE user_id = $1", user_id)
+
+async def resume_admin(user_id: int):
+    """Adminni qayta faollashtirish"""
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE admins SET active = TRUE WHERE user_id = $1", user_id)
+
+async def extend_admin(user_id: int, new_expires_at: int):
+    """Admin muddatini uzaytirish"""
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE admins SET expires_at = $1 WHERE user_id = $2", new_expires_at, user_id)
+
+async def get_all_admins():
+    """Barcha adminlar ro'yxati"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetch("SELECT * FROM admins ORDER BY created_at DESC")
+
+async def get_admin_managed_groups(uid: int) -> list[int]:
+    """Admin boshqaradigan guruhlar ro'yxati"""
+    if uid in ADMIN_IDS:
+        return GROUP_IDS
+    
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT managed_groups FROM admins WHERE user_id = $1", uid)
+        if row and row['managed_groups']:
+            return list(row['managed_groups'])
+        return []
+
 async def is_member_of_any_group(uid: int) -> bool:
     """Foydalanuvchi kamida bitta guruhda ekanligini tekshirish."""
     for group_id in GROUP_IDS:
@@ -621,15 +724,22 @@ async def on_chat_member_updated(event: ChatMemberUpdated):
     except Exception as e:
         logger.error(f"Error in on_chat_member_updated: {e}")
 
-def admin_reply_keyboard() -> ReplyKeyboardMarkup:
+def admin_reply_keyboard(uid: int) -> ReplyKeyboardMarkup:
     """Admin uchun doim ko'rinadigan tugmalar."""
+    keyboard = [
+        [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
+        [KeyboardButton(text="✅ Tasdiqlangan to'lovlar"), KeyboardButton(text="⏳ Kutilayotgan to'lovlar")],
+    ]
+    
+    # Super admin uchun qo'shimcha tugmalar
+    if is_super_admin(uid):
+        keyboard.append([KeyboardButton(text="➕ Guruh qo'shish"), KeyboardButton(text="👥 Adminlar")])
+        keyboard.append([KeyboardButton(text="📝 Shartnoma tahrirlash"), KeyboardButton(text="🧹 Tozalash")])
+    else:
+        keyboard.append([KeyboardButton(text="📝 Shartnoma tahrirlash"), KeyboardButton(text="🧹 Tozalash")])
+    
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
-            [KeyboardButton(text="✅ Tasdiqlangan to'lovlar"), KeyboardButton(text="⏳ Kutilayotgan to'lovlar")],
-            [KeyboardButton(text="➕ Guruh qo'shish"), KeyboardButton(text="📝 Shartnoma tahrirlash")],
-            [KeyboardButton(text="🧹 Tozalash")]
-        ],
+        keyboard=keyboard,
         resize_keyboard=True,
         persistent=True
     )
@@ -637,12 +747,12 @@ def admin_reply_keyboard() -> ReplyKeyboardMarkup:
 @dp.message(Command("start"))
 async def cmd_start(m: Message):
     try:
-        # Admin uchun alohida interfeys
-        if is_admin(m.from_user.id):
+        # Admin uchun alohida interfeys (Super Admin yoki Faol Admin)
+        if await is_active_admin(m.from_user.id):
             await m.answer(
                 "👨‍💼 *ADMIN PANEL*\n\n"
                 "Quyidagi tugmalardan birini tanlang:",
-                reply_markup=admin_reply_keyboard(),
+                reply_markup=admin_reply_keyboard(m.from_user.id),
                 parse_mode="Markdown"
             )
             return
@@ -980,6 +1090,341 @@ async def cmd_remove_group(m: Message):
         await m.answer("❌ Guruh ID raqam bo'lishi kerak!")
     except Exception as e:
         logger.error(f"Error in cmd_remove_group: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("admins"))
+async def cmd_admins(m: Message):
+    """Barcha adminlar ro'yxati (faqat super admin)."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    admins = await get_all_admins()
+    if not admins:
+        return await m.answer(
+            "❌ Hozircha adminlar mavjud emas.\n\n"
+            "➕ Yangi admin qo'shish:\n"
+            "<code>/add_admin USER_ID MUDDATI [Guruhlar]</code>\n\n"
+            "Misol:\n"
+            "<code>/add_admin 123456789 30</code> - 30 kunlik admin\n"
+            "<code>/add_admin 123456789 0</code> - Cheksiz muddatli admin",
+            parse_mode="HTML"
+        )
+    
+    now = int(datetime.utcnow().timestamp())
+    lines = ["👥 <b>Adminlar ro'yxati:</b>\n"]
+    
+    for row in admins:
+        uid = row['user_id']
+        name = row['name'] or f"User {uid}"
+        role = row['role']
+        active = row['active']
+        expires_at = row['expires_at']
+        created_at = row['created_at']
+        managed_groups = row['managed_groups'] or []
+        
+        status_emoji = "✅" if active else "⏸️"
+        role_text = "🔴 Super Admin" if role == 'super_admin' else "🔵 Admin"
+        
+        created_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        
+        if expires_at:
+            exp_str, days_left = human_left(expires_at)
+            if expires_at < now:
+                expiry_text = f"❌ Muddati tugagan ({exp_str})"
+            else:
+                expiry_text = f"📅 {exp_str} ({days_left} kun)"
+        else:
+            expiry_text = "♾️ Cheksiz"
+        
+        groups_text = f"{len(managed_groups)} ta guruh" if managed_groups else "Barcha guruhlar"
+        
+        lines.append(
+            f"{status_emoji} <b>{name}</b> {role_text}\n"
+            f"   ID: <code>{uid}</code>\n"
+            f"   Guruhlar: {groups_text}\n"
+            f"   Muddat: {expiry_text}\n"
+            f"   Qo'shilgan: {created_date}\n"
+        )
+    
+    lines.append("\n💡 <b>Buyruqlar:</b>")
+    lines.append("➕ <code>/add_admin USER_ID MUDDATI</code>")
+    lines.append("➖ <code>/remove_admin USER_ID</code>")
+    lines.append("⏸️ <code>/pause_admin USER_ID</code>")
+    lines.append("▶️ <code>/resume_admin USER_ID</code>")
+    lines.append("📅 <code>/extend_admin USER_ID MUDDATI</code>")
+    
+    await m.answer("\n".join(lines), parse_mode="HTML")
+
+@dp.message(Command("add_admin"))
+async def cmd_add_admin(m: Message):
+    """Yangi admin qo'shish (faqat super admin)."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split()
+        if len(parts) < 3:
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/add_admin USER_ID MUDDATI</code>\n\n"
+                "Misol:\n"
+                "<code>/add_admin 123456789 30</code> - 30 kunlik admin\n"
+                "<code>/add_admin 123456789 0</code> - Cheksiz muddatli admin",
+                parse_mode="HTML"
+            )
+        
+        user_id = int(parts[1])
+        days = int(parts[2])
+        
+        # Super admin bo'lsa
+        if user_id in ADMIN_IDS:
+            return await m.answer("❌ Bu foydalanuvchi allaqachon super admin!")
+        
+        # Muddatni hisoblash
+        if days > 0:
+            expires_at = int((datetime.utcnow() + timedelta(days=days)).timestamp())
+            expiry_text = f"{days} kun"
+        else:
+            expires_at = None
+            expiry_text = "Cheksiz"
+        
+        # Foydalanuvchi ma'lumotlarini olish
+        try:
+            username, full_name = await fetch_user_profile(user_id)
+            admin_name = full_name or username or f"User {user_id}"
+        except Exception:
+            admin_name = f"User {user_id}"
+        
+        # Admin qo'shish
+        await add_admin_to_db(
+            user_id=user_id,
+            name=admin_name,
+            role='admin',
+            created_by=m.from_user.id,
+            expires_at=expires_at,
+            managed_groups=GROUP_IDS  # Barcha guruhlar
+        )
+        
+        await m.answer(
+            f"✅ <b>Admin muvaffaqiyatli qo'shildi!</b>\n\n"
+            f"👤 Ism: {admin_name}\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"📅 Muddat: {expiry_text}\n"
+            f"📚 Guruhlar: {len(GROUP_IDS)} ta guruh",
+            parse_mode="HTML"
+        )
+        logger.info(f"Super admin {m.from_user.id} added admin {user_id} with {days} days")
+        
+        # Yangi adminga xabar yuborish
+        try:
+            await bot.send_message(
+                user_id,
+                f"🎉 <b>Tabriklaymiz!</b>\n\n"
+                f"Siz admin sifatida tayinlandingiz!\n\n"
+                f"📅 Muddat: {expiry_text}\n"
+                f"📚 Boshqariladigan guruhlar: {len(GROUP_IDS)} ta\n\n"
+                f"Bot'ga /start buyrug'ini yuboring.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify new admin {user_id}: {e}")
+        
+    except ValueError:
+        await m.answer("❌ User ID va muddat raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_add_admin: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("remove_admin"))
+async def cmd_remove_admin(m: Message):
+    """Adminni o'chirish (faqat super admin)."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split()
+        if len(parts) < 2:
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/remove_admin USER_ID</code>",
+                parse_mode="HTML"
+            )
+        
+        user_id = int(parts[1])
+        
+        # Super admin bo'lsa
+        if user_id in ADMIN_IDS:
+            return await m.answer("❌ Super adminni o'chirish mumkin emas!")
+        
+        # Admin mavjudligini tekshirish
+        admin_info = await get_admin_info(user_id)
+        if not admin_info:
+            return await m.answer(f"❌ Admin topilmadi: <code>{user_id}</code>", parse_mode="HTML")
+        
+        # Adminni o'chirish
+        await remove_admin_from_db(user_id)
+        
+        await m.answer(
+            f"✅ <b>Admin muvaffaqiyatli o'chirildi!</b>\n\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"👤 Ism: {admin_info['name']}",
+            parse_mode="HTML"
+        )
+        logger.info(f"Super admin {m.from_user.id} removed admin {user_id}")
+        
+        # O'chirilgan adminga xabar yuborish
+        try:
+            await bot.send_message(
+                user_id,
+                "⚠️ <b>Diqqat!</b>\n\n"
+                "Sizning admin huquqlaringiz bekor qilindi.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        
+    except ValueError:
+        await m.answer("❌ User ID raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_remove_admin: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("pause_admin"))
+async def cmd_pause_admin(m: Message):
+    """Adminni vaqtincha to'xtatish (faqat super admin)."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split()
+        if len(parts) < 2:
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/pause_admin USER_ID</code>",
+                parse_mode="HTML"
+            )
+        
+        user_id = int(parts[1])
+        
+        if user_id in ADMIN_IDS:
+            return await m.answer("❌ Super adminni to'xtatish mumkin emas!")
+        
+        admin_info = await get_admin_info(user_id)
+        if not admin_info:
+            return await m.answer(f"❌ Admin topilmadi: <code>{user_id}</code>", parse_mode="HTML")
+        
+        if not admin_info['active']:
+            return await m.answer("⚠️ Admin allaqachon to'xtatilgan!")
+        
+        await pause_admin(user_id)
+        
+        await m.answer(
+            f"⏸️ <b>Admin vaqtincha to'xtatildi!</b>\n\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"👤 Ism: {admin_info['name']}\n\n"
+            f"Qayta faollashtirish: <code>/resume_admin {user_id}</code>",
+            parse_mode="HTML"
+        )
+        logger.info(f"Super admin {m.from_user.id} paused admin {user_id}")
+        
+    except ValueError:
+        await m.answer("❌ User ID raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_pause_admin: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("resume_admin"))
+async def cmd_resume_admin(m: Message):
+    """Adminni qayta faollashtirish (faqat super admin)."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split()
+        if len(parts) < 2:
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/resume_admin USER_ID</code>",
+                parse_mode="HTML"
+            )
+        
+        user_id = int(parts[1])
+        
+        admin_info = await get_admin_info(user_id)
+        if not admin_info:
+            return await m.answer(f"❌ Admin topilmadi: <code>{user_id}</code>", parse_mode="HTML")
+        
+        if admin_info['active']:
+            return await m.answer("⚠️ Admin allaqachon faol!")
+        
+        await resume_admin(user_id)
+        
+        await m.answer(
+            f"▶️ <b>Admin qayta faollashtirildi!</b>\n\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"👤 Ism: {admin_info['name']}",
+            parse_mode="HTML"
+        )
+        logger.info(f"Super admin {m.from_user.id} resumed admin {user_id}")
+        
+    except ValueError:
+        await m.answer("❌ User ID raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_resume_admin: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("extend_admin"))
+async def cmd_extend_admin(m: Message):
+    """Admin muddatini uzaytirish (faqat super admin)."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = (m.text or "").split()
+        if len(parts) < 3:
+            return await m.answer(
+                "❌ Noto'g'ri format!\n\n"
+                "To'g'ri format:\n"
+                "<code>/extend_admin USER_ID MUDDATI</code>\n\n"
+                "Misol:\n"
+                "<code>/extend_admin 123456789 30</code> - 30 kunlik uzaytirish\n"
+                "<code>/extend_admin 123456789 0</code> - Cheksiz qilish",
+                parse_mode="HTML"
+            )
+        
+        user_id = int(parts[1])
+        days = int(parts[2])
+        
+        admin_info = await get_admin_info(user_id)
+        if not admin_info:
+            return await m.answer(f"❌ Admin topilmadi: <code>{user_id}</code>", parse_mode="HTML")
+        
+        if days > 0:
+            new_expires_at = int((datetime.utcnow() + timedelta(days=days)).timestamp())
+            expiry_text = f"{days} kun"
+        else:
+            new_expires_at = None
+            expiry_text = "Cheksiz"
+        
+        await extend_admin(user_id, new_expires_at)
+        
+        await m.answer(
+            f"📅 <b>Admin muddati uzaytirildi!</b>\n\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"👤 Ism: {admin_info['name']}\n"
+            f"📅 Yangi muddat: {expiry_text}",
+            parse_mode="HTML"
+        )
+        logger.info(f"Super admin {m.from_user.id} extended admin {user_id} by {days} days")
+        
+    except ValueError:
+        await m.answer("❌ User ID va muddat raqam bo'lishi kerak!")
+    except Exception as e:
+        logger.error(f"Error in cmd_extend_admin: {e}")
         await m.answer(f"❌ Xatolik yuz berdi: {e}")
 
 @dp.message(Command("edit_contract"))
@@ -2040,7 +2485,7 @@ async def admin_cleanup_button(m: Message):
         await bot.send_message(
             m.from_user.id,
             "👨‍💼 *ADMIN PANEL*",
-            reply_markup=admin_reply_keyboard(),
+            reply_markup=admin_reply_keyboard(m.from_user.id),
             parse_mode="Markdown"
         )
         
@@ -2051,8 +2496,8 @@ async def admin_cleanup_button(m: Message):
 @dp.message(F.text == "➕ Guruh qo'shish")
 async def admin_add_group_button(m: Message):
     """Admin Guruh qo'shish tugmasi handleri."""
-    if not is_admin(m.from_user.id):
-        return
+    if not is_super_admin(m.from_user.id):
+        return await m.answer("⛔ Bu tugma faqat super adminlar uchun.")
     
     await m.answer(
         "➕ <b>Guruh qo'shish</b>\n\n"
@@ -2066,6 +2511,15 @@ async def admin_add_group_button(m: Message):
         "3️⃣ Bot guruh ID'ni ko'rsatadi",
         parse_mode="HTML"
     )
+
+@dp.message(F.text == "👥 Adminlar")
+async def admin_list_button(m: Message):
+    """Admin Adminlar ro'yxati tugmasi handleri."""
+    if not is_super_admin(m.from_user.id):
+        return await m.answer("⛔ Bu tugma faqat super adminlar uchun.")
+    
+    # /admins buyrug'ini chaqirish
+    await cmd_admins(m)
 
 @dp.message(F.text == "📝 Shartnoma tahrirlash")
 async def admin_edit_contract_button(m: Message):
@@ -3140,10 +3594,47 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
         except Exception as e:
             logger.warning(f"Failed to send warning to admin {aid}: {e}")
 
+async def check_expired_admins():
+    """Muddati tugagan adminlarni auto-deactivate qilish"""
+    try:
+        async with db_pool.acquire() as conn:
+            now = int(datetime.utcnow().timestamp())
+            expired_admins = await conn.fetch("""
+                SELECT user_id, name, expires_at FROM admins
+                WHERE active = TRUE AND expires_at IS NOT NULL AND expires_at < $1
+            """, now)
+            
+            for row in expired_admins:
+                uid = row['user_id']
+                name = row['name']
+                expires_at = row['expires_at']
+                
+                await pause_admin(uid)
+                logger.info(f"Auto-deactivated admin {uid} ({name}) - expired at {expires_at}")
+                
+                try:
+                    exp_str, _ = human_left(expires_at)
+                    await bot.send_message(
+                        uid,
+                        f"⚠️ <b>Diqqat!</b>\n\n"
+                        f"Admin huquqlaringiz muddati tugadi ({exp_str}).\n\n"
+                        f"Davom ettirish uchun super admin bilan bog'laning.",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not notify expired admin {uid}: {e}")
+    
+    except Exception as e:
+        logger.error(f"Error in check_expired_admins: {e}")
+
 async def auto_kick_loop():
     await asyncio.sleep(5)
     while True:
         try:
+            try:
+                await check_expired_admins()
+            except Exception:
+                logger.exception("check_expired_admins failed")
             try:
                 for uid, gid, exp_at in await soon_expiring_users(REMIND_DAYS):
                     await _warn_and_buttons(uid, gid, exp_at, reason="soon")
@@ -3171,7 +3662,7 @@ async def auto_kick_loop():
 
 @dp.callback_query(F.data.startswith("warn_paid:"))
 async def cb_warn_paid(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")
@@ -3193,7 +3684,7 @@ async def cb_warn_paid(c: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("warn_notpaid:"))
 async def cb_warn_notpaid(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")

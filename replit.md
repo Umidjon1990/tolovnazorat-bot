@@ -1,12 +1,14 @@
 # Overview
 
-This project is a dual-workflow Telegram bot system designed for managing online course subscriptions, with a future vision for multi-tenancy.
+This project is a **Multi-Tenant Telegram Bot System** for managing online course subscriptions with Super Admin and Admin role-based access control.
 
 The primary active workflow facilitates **Group-Based Direct Registration**: users who join a group can register by providing their name and phone number, with admin approval leading to a 30-day auto-subscription without requiring payment receipts or invite links.
 
 The system also retains a **Legacy Mini App Payment Workflow** (currently inactive) that uses a React Mini App and FastAPI for payment-based subscriptions, where users upload payment receipts for admin approval to generate invite links. This legacy code is preserved for future multi-tenant expansion.
 
 The system leverages PostgreSQL for data persistence and aiogram 3.x for the bot framework, including robust automated subscription management with warnings and auto-kick features.
+
+**Multi-Tenant Architecture**: The system supports multiple independent administrators (Super Admin and Admins) with database-driven role management, expiration control, and group assignment.
 
 # User Preferences
 
@@ -27,6 +29,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - `user_groups` (many-to-many group access)
   - `contract_templates` (editable contract text with history)
   - **`groups`** (database-driven group management for multi-tenant support)
+  - **`admins`** (multi-tenant admin management: user_id, role, active, expires_at, managed_groups)
 
 ## Configuration Management
 - **Approach**: Hybrid - critical secrets in environment variables, dynamic data in database.
@@ -37,8 +40,12 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Multi-Tenant Ready**: Admins can add/remove groups via bot commands without code changes or redeployment.
 
 ## Access Control
-- **Admin System**: Role-based access using user ID whitelist.
-- **Group Management**: Supports multiple private groups via ID configuration.
+- **Multi-Tier Admin System**: 
+  - **Super Admin** (`ADMIN_IDS`): Full system control, can manage other admins, unlimited access
+  - **Regular Admin** (Database): Managed by Super Admin with expiration dates and group assignments
+  - **Role-Based Permissions**: Different admin panels for Super Admin vs Regular Admin
+  - **Auto-Deactivation**: Expired admins are automatically deactivated every 60 seconds
+- **Group Management**: Supports multiple private groups via database-driven ID configuration
 
 ## Message Handling
 - **Pattern**: Handler-based routing using decorators.
@@ -60,6 +67,13 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
     - `/groups` - List all groups from database
     - `/add_group GROUP_ID [NAME]` - Add new group (no Railway access needed!)
     - `/remove_group GROUP_ID` - Remove group
+  - **Admin Management** (Super Admin Only):
+    - `/admins` - List all admins with status, role, expiry
+    - `/add_admin USER_ID MUDDATI` - Add new admin (30 days or 0 for unlimited)
+    - `/remove_admin USER_ID` - Remove admin
+    - `/pause_admin USER_ID` - Temporarily deactivate admin
+    - `/resume_admin USER_ID` - Reactivate paused admin
+    - `/extend_admin USER_ID MUDDATI` - Extend admin expiration
   - **Statistics**:
     - `/stats` - Overall statistics
     - `/gstats` - Detailed group statistics
@@ -71,10 +85,12 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - **Contract Management**:
     - `/edit_contract` - Update contract template (text or file)
   - Payment approval and subscription management via inline buttons
-- **Automation**: Auto-kick loop, subscription expiry warnings with action buttons (runs every 60 seconds).
+- **Automation**: Auto-kick loop, subscription expiry warnings with action buttons, admin expiry auto-deactivation (runs every 60 seconds).
 
 ## UI/UX Decisions
-- **Admin Panel**: Persistent reply keyboard for admins with essential buttons ("📊 Statistika", "✅ Tasdiqlangan to'lovlar", "⏳ Kutilayotgan to'lovlar", "🧹 Tozalash").
+- **Admin Panel**: Persistent reply keyboard with role-based buttons:
+  - **Super Admin**: Statistika, Guruh o'quvchilari, To'lovlar, Guruh qo'shish, Adminlar, Shartnoma tahrirlash, Tozalash
+  - **Regular Admin**: Statistika, Guruh o'quvchilari, To'lovlar, Shartnoma tahrirlash, Tozalash
 - **Message Cleanup**: Automatic deletion of bot messages in admin chats after actions like payment approval to maintain cleanliness.
 - **Smart Chat Links**: User messages use `[username](tg://user?id=...)` for clickable profiles.
 
