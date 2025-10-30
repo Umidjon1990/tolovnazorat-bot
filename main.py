@@ -504,9 +504,15 @@ def contact_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True, one_time_keyboard=True
     )
 
-async def resolve_group_titles() -> list[tuple[int, str]]:
+async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tuple[int, str]]:
+    """Guruh ID'larini nomlariga aylantirish.
+    
+    Args:
+        group_ids: Agar berilsa, faqat shu guruhlar. Aks holda, barcha GROUP_IDS.
+    """
+    ids_to_resolve = group_ids if group_ids is not None else GROUP_IDS
     result = []
-    for gid in GROUP_IDS:
+    for gid in ids_to_resolve:
         try:
             chat = await bot.get_chat(gid)
             title = chat.title or str(gid)
@@ -615,6 +621,30 @@ async def get_admin_managed_groups(uid: int) -> list[int]:
         row = await conn.fetchrow("SELECT managed_groups FROM admins WHERE user_id = $1", uid)
         if row and row['managed_groups']:
             return list(row['managed_groups'])
+        return []
+
+async def get_allowed_groups(uid: int) -> list[int]:
+    """Admin uchun ruxsat etilgan guruhlar ro'yxatini olish.
+    
+    Bu markazlashtirilgan funksiya barcha admin handlerlarida ishlatiladi:
+    - Super adminlar uchun: barcha guruhlar (GROUP_IDS)
+    - Oddiy adminlar uchun: faqat tayinlangan guruhlar (managed_groups)
+    """
+    if is_super_admin(uid):
+        return GROUP_IDS
+    
+    # Database'dan adminning managed_groups'ini olish
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT managed_groups FROM admins 
+            WHERE user_id = $1 AND active = TRUE
+        """, uid)
+        
+        if row and row['managed_groups']:
+            # Faqat mavjud guruhlarni qaytarish
+            managed = list(row['managed_groups'])
+            return [gid for gid in managed if gid in GROUP_IDS]
+        
         return []
 
 async def is_member_of_any_group(uid: int) -> bool:
@@ -1906,16 +1936,19 @@ async def cmd_unregistered(m: Message):
 
 @dp.message(Command("stats"))
 async def cmd_stats(m: Message):
-    if not is_admin(m.from_user.id):
-        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}\nAdmin IDs: {ADMIN_IDS}")
-    if not GROUP_IDS:
-        return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
+    if not await is_active_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    # Ruxsat etilgan guruhlarni olish
+    allowed_groups = await get_allowed_groups(m.from_user.id)
+    if not allowed_groups:
+        return await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
     
     now = int(datetime.utcnow().timestamp())
     
-    # Barcha guruhlardagi unique userlarni yig'amiz
+    # Faqat ruxsat etilgan guruhlardagi unique userlarni yig'amiz
     all_users = {}
-    for gid in GROUP_IDS:
+    for gid in allowed_groups:
         members = await all_members_of_group(gid)
         for uid, username, full_name, exp, phone in members:
             if uid not in all_users or (all_users[uid] or 0) < (exp or 0):
@@ -1931,12 +1964,12 @@ async def cmd_stats(m: Message):
         f"— Jami: {total}\n"
         f"— Aktiv: {active}\n"
         f"— Muddati tugagan: {expired}\n\n"
-        "📚 Guruhlar kesimi:"
+        f"📚 Guruhlar kesimi ({len(allowed_groups)} ta):"
     )
     await m.answer(header)
     
-    titles = dict(await resolve_group_titles())
-    for gid in GROUP_IDS:
+    titles = dict(await resolve_group_titles(allowed_groups))
+    for gid in allowed_groups:
         users = await all_members_of_group(gid)
         # Faqat aktiv obunali foydalanuvchilarni qoldirish
         active_users = [(uid, username, full_name, exp, phone) 
@@ -1977,19 +2010,21 @@ async def cmd_stats(m: Message):
 @dp.message(Command("gstats"))
 async def cmd_gstats(m: Message):
     """Batafsil guruh statistikasi: foydalanuvchi, telefon, tugash sanasi."""
-    if not is_admin(m.from_user.id):
-        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}\nAdmin IDs: {ADMIN_IDS}")
+    if not await is_active_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
-    if not GROUP_IDS:
-        return await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
+    # Ruxsat etilgan guruhlarni olish
+    allowed_groups = await get_allowed_groups(m.from_user.id)
+    if not allowed_groups:
+        return await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
     
     try:
-        titles = dict(await resolve_group_titles())
-        total_groups = len(GROUP_IDS)
+        titles = dict(await resolve_group_titles(allowed_groups))
+        total_groups = len(allowed_groups)
         
         await m.answer(f"📊 *Guruhlar statistikasi*\n\n🏫 Jami guruhlar: {total_groups}\n", parse_mode="Markdown")
         
-        for idx, gid in enumerate(GROUP_IDS, start=1):
+        for idx, gid in enumerate(allowed_groups, start=1):
             users = await all_members_of_group(gid)
             title = titles.get(gid, f"Guruh {gid}")
             
