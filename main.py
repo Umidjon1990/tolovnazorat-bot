@@ -886,6 +886,8 @@ async def cmd_groups(m: Message):
 @dp.message(Command("add_group"))
 async def cmd_add_group(m: Message):
     """Yangi guruh qo'shish."""
+    global GROUP_IDS
+    
     if not is_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
@@ -908,7 +910,6 @@ async def cmd_add_group(m: Message):
         await add_group_to_db(group_id, name)
         
         # GROUP_IDS ni yangilash
-        global GROUP_IDS
         GROUP_IDS = await load_groups_from_db()
         
         # Guruh nomini olish (Telegram API orqali)
@@ -939,6 +940,8 @@ async def cmd_add_group(m: Message):
 @dp.message(Command("remove_group"))
 async def cmd_remove_group(m: Message):
     """Guruhni o'chirish."""
+    global GROUP_IDS
+    
     if not is_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
@@ -962,7 +965,6 @@ async def cmd_remove_group(m: Message):
         await remove_group_from_db(group_id)
         
         # GROUP_IDS ni yangilash
-        global GROUP_IDS
         GROUP_IDS = await load_groups_from_db()
         
         await m.answer(
