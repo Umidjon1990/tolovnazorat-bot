@@ -45,7 +45,15 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 
 ## Bot Features
 - **User Flow**: Contract acceptance, course selection, phone input, payment submission, admin approval, and group membership.
-- **Admin Commands**: `/myid`, `/groups`, `/stats`, `/gstats` (detailed group statistics), payment approval, subscription management.
+- **Admin Commands**: 
+  - `/myid` - User's Telegram ID
+  - `/groups` - List configured groups
+  - `/stats` - Overall statistics
+  - `/gstats` - Detailed group statistics
+  - `/add_user USER_ID [DATE]` - Manually add user to subscription (bugundan or YYYY-MM-DD)
+  - `/unregistered` - Show users in group without active subscription (link orqali kirganlar va ro'yxatdan o'tmaganlar)
+  - `/bulk_add` - Info about Telegram API limitations for bulk registration
+  - Payment approval and subscription management via inline buttons
 - **Automation**: Auto-kick loop, subscription expiry warnings with action buttons (runs every 60 seconds).
 
 ## UI/UX Decisions
