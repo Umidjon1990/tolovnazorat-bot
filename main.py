@@ -71,6 +71,7 @@ WAIT_DATE_FOR: dict[int, int] = {}
 MULTI_PICK: dict[int, dict] = {}
 WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
+WAIT_CONTRACT_EDIT: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 # Admin xabarlarini kuzatish (payment_id -> [message_ids])
 ADMIN_MESSAGES: dict[int, list[int]] = {}
@@ -763,6 +764,40 @@ async def cmd_groups(m: Message):
     rows = await resolve_group_titles()
     txt = "🔗 Ulangan guruhlar:\n" + "\n".join([f"• {t} — {gid}" for gid, t in rows])
     await m.answer(txt)
+
+@dp.message(Command("edit_contract"))
+async def cmd_edit_contract(m: Message):
+    """Admin uchun shartnoma matnini tahrirlash."""
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        # Hozirgi shartnoma matnini olish
+        contract_text = await get_contract_template()
+        
+        # Shartnoma matnini .txt file sifatida yuborish
+        txt_bytes = contract_text.encode('utf-8')
+        txt_file = BufferedInputFile(txt_bytes, filename="shartnoma.txt")
+        
+        await m.answer_document(
+            txt_file,
+            caption=(
+                "📄 <b>Hozirgi shartnoma matni</b>\n\n"
+                "📝 Shartnoma matnini o'zgartirish uchun:\n"
+                "1️⃣ .txt faylni yuklang\n"
+                "2️⃣ Yoki to'g'ridan-to'g'ri matn yuboring\n\n"
+                "⚠️ Yangi matnni faylda yoki xabarda yuboring."
+            ),
+            parse_mode="HTML"
+        )
+        
+        # Yangi shartnoma matnini kutish
+        WAIT_CONTRACT_EDIT.add(m.from_user.id)
+        logger.info(f"Admin {m.from_user.id} started contract editing")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_edit_contract: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
 
 @dp.message(Command("bulk_add"))
 async def cmd_bulk_add(m: Message):
@@ -1685,6 +1720,32 @@ async def admin_cleanup_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
+    # Shartnoma matnini tahrirlash (admin)
+    if m.from_user.id in WAIT_CONTRACT_EDIT:
+        try:
+            new_contract_text = (m.text or "").strip()
+            
+            if len(new_contract_text) < 50:
+                return await m.answer("❗ Shartnoma matni juda qisqa. Iltimos, to'liq matn kiriting (kamida 50 ta belgi)")
+            
+            # Shartnoma matnini yangilash
+            await update_contract_template(new_contract_text)
+            WAIT_CONTRACT_EDIT.discard(m.from_user.id)
+            
+            await m.answer(
+                "✅ <b>Shartnoma matni yangilandi!</b>\n\n"
+                f"📝 Uzunligi: {len(new_contract_text)} belgi\n\n"
+                "Endi yangi ro'yxatdan o'tuvchilar bu shartnomani ko'rishadi.",
+                parse_mode="HTML"
+            )
+            
+            logger.info(f"Admin {m.from_user.id} updated contract template")
+            
+        except Exception as e:
+            logger.error(f"Error updating contract: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+        return
+    
     # Ism-familiya qabul qilish (yangi ro'yxatdan o'tish tizimi)
     if m.from_user.id in WAIT_FULLNAME_FOR:
         try:
@@ -1895,6 +1956,45 @@ async def on_contact(m: Message):
         logger.error(f"Error in on_contact: {e}")
         await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
 
+@dp.message(F.document)
+async def on_document(m: Message):
+    """Document (fayl) qabul qilish - shartnoma matni uchun."""
+    # Shartnoma matnini .txt file orqali qabul qilish
+    if m.from_user.id in WAIT_CONTRACT_EDIT:
+        try:
+            document = m.document
+            
+            # Faqat .txt fayllarni qabul qilish
+            if not document.file_name.endswith('.txt'):
+                return await m.answer("❗ Faqat .txt fayllarni yuklang")
+            
+            # Faylni yuklab olish
+            file = await bot.get_file(document.file_id)
+            file_bytes = await bot.download_file(file.file_path)
+            
+            # Matnni o'qish
+            new_contract_text = file_bytes.read().decode('utf-8').strip()
+            
+            if len(new_contract_text) < 50:
+                return await m.answer("❗ Shartnoma matni juda qisqa. Iltimos, to'liq matn kiriting (kamida 50 ta belgi)")
+            
+            # Shartnoma matnini yangilash
+            await update_contract_template(new_contract_text)
+            WAIT_CONTRACT_EDIT.discard(m.from_user.id)
+            
+            await m.answer(
+                "✅ <b>Shartnoma matni yangilandi!</b>\n\n"
+                f"📝 Uzunligi: {len(new_contract_text)} belgi\n\n"
+                "Endi yangi ro'yxatdan o'tuvchilar bu shartnomani ko'rishadi.",
+                parse_mode="HTML"
+            )
+            
+            logger.info(f"Admin {m.from_user.id} updated contract template via file")
+            
+        except Exception as e:
+            logger.error(f"Error processing contract file: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+        return
 
 @dp.callback_query(F.data == "pay_card")
 async def cb_pay_card(c: CallbackQuery):
