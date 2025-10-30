@@ -1591,10 +1591,15 @@ async def cmd_add_user(m: Message):
     - /add_user 123456789 now
     - /add_user 987654321 2025-11-15
     """
-    if not is_admin(m.from_user.id):
+    if not await is_active_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
     try:
+        # Admin'ning ruxsat etilgan guruhlarini olish
+        allowed_groups = await get_allowed_groups(m.from_user.id)
+        if not allowed_groups:
+            return await m.answer("❌ Sizga hech qanday guruhga ruxsat yo'q!")
+        
         # Parametrlarni parsing qilish
         parts = m.text.split()
         
@@ -1635,11 +1640,8 @@ async def cmd_add_user(m: Message):
         # Foydalanuvchi ma'lumotlarini olish
         username, fullname = await fetch_user_profile(user_id)
         
-        # Birinchi guruhga qo'shish
-        if not GROUP_IDS:
-            return await m.answer("❗ Guruhlar topilmadi. PRIVATE_GROUP_ID ni sozlang.")
-        
-        primary_gid = GROUP_IDS[0]
+        # Adminning birinchi ruxsat etilgan guruhiga qo'shish
+        primary_gid = allowed_groups[0]
         
         # Database'ga qo'shish
         await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
@@ -1689,8 +1691,13 @@ async def cmd_add_users(m: Message):
     - /add_users 123456789 987654321 2025-11-15
     - /add_users 111 222 333 444 555 2025-12-01
     """
-    if not is_admin(m.from_user.id):
+    if not await is_active_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    # Admin'ning ruxsat etilgan guruhlarini olish
+    allowed_groups = await get_allowed_groups(m.from_user.id)
+    if not allowed_groups:
+        return await m.answer("❌ Sizga hech qanday guruhga ruxsat yo'q!")
     
     try:
         # Parametrlarni parsing qilish
@@ -1744,11 +1751,8 @@ async def cmd_add_users(m: Message):
         human_start = (start_date + TZ_OFFSET).strftime("%Y-%m-%d")
         human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
         
-        # Birinchi guruhni olish
-        if not GROUP_IDS:
-            return await m.answer("❗ Guruhlar topilmadi. PRIVATE_GROUP_ID ni sozlang.")
-        
-        primary_gid = GROUP_IDS[0]
+        # Adminning birinchi ruxsat etilgan guruhiga qo'shish
+        primary_gid = allowed_groups[0]
         
         # Jarayonni boshlash
         processing_msg = await m.answer(f"⏳ {len(user_ids)} ta foydalanuvchi qo'shilmoqda...")
@@ -1831,19 +1835,24 @@ async def cmd_unregistered(m: Message):
     - Obuna yo'q yoki tugaganlarni ko'rsatadi
     - Telegram API'ga murojaat qilmaydi (tez ishlaydi)
     """
-    if not is_admin(m.from_user.id):
+    if not await is_active_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
     try:
+        # Admin'ning ruxsat etilgan guruhlarini olish
+        allowed_groups = await get_allowed_groups(m.from_user.id)
+        if not allowed_groups:
+            return await m.answer("❌ Sizga hech qanday guruhga ruxsat yo'q!")
+        
         processing_msg = await m.answer("⏳ Database tekshirilmoqda...")
         
         now = int(datetime.utcnow().timestamp())
         unregistered_users = []
         
-        # Har bir guruhni tekshirish
-        titles = dict(await resolve_group_titles())
+        # Faqat ruxsat etilgan guruhlarni tekshirish
+        titles = dict(await resolve_group_titles(allowed_groups))
         
-        for gid in GROUP_IDS:
+        for gid in allowed_groups:
             # Database'dan guruhga tegishli barcha userlarni olish
             async with db_pool.acquire() as conn:
                 # users jadvalidan obuna yo'q yoki tugaganlarni olish
@@ -3286,7 +3295,7 @@ async def cb_approve_date(c: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("ap_single:"))
 async def cb_ap_single(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")
@@ -3294,7 +3303,11 @@ async def cb_ap_single(c: CallbackQuery):
         with_date_iso = None
         if len(parts) >= 4 and parts[2] == "with_date":
             with_date_iso = parts[3]
-        groups = await resolve_group_titles()
+        
+        # Faqat ruxsat etilgan guruhlarni olish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        groups = await resolve_group_titles(allowed_groups)
+        
         rows = []
         for gid, title in groups:
             cb = f"pick_group:{pid}:{gid}" if not with_date_iso else f"pick_group:{pid}:{gid}:with_date:{with_date_iso}"
@@ -3310,7 +3323,7 @@ async def cb_ap_single(c: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("ms_open:"))
 async def cb_ms_open(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")
@@ -3318,7 +3331,11 @@ async def cb_ms_open(c: CallbackQuery):
         with_date_iso = None
         if len(parts) >= 4 and parts[2] == "with_date":
             with_date_iso = parts[3]
-        groups = await resolve_group_titles()
+        
+        # Faqat ruxsat etilgan guruhlarni olish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        groups = await resolve_group_titles(allowed_groups)
+        
         MULTI_PICK[c.from_user.id] = {"pid": pid, "start_iso": with_date_iso, "selected": set()}
         kb = multi_select_kb(pid, groups, set(), with_date_iso)
         msg = await c.message.answer("🧭 Bir necha guruhni tanlang (✅ belgilab, so'ng Tasdiqlash):", reply_markup=kb)
@@ -3331,11 +3348,16 @@ async def cb_ms_open(c: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("ms_toggle:"))
 async def cb_ms_toggle(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")
         pid = int(parts[1]); gid = int(parts[2])
+        
+        # Guruh ruxsatini tekshirish
+        if not await check_group_access(c.from_user.id, gid):
+            return await c.answer("❌ Sizga bu guruhga ruxsat yo'q!", show_alert=True)
+        
         state = MULTI_PICK.get(c.from_user.id)
         if not state or state.get("pid") != pid:
             return await c.answer("Sessiya topilmadi. Qaytadan oching.", show_alert=True)
@@ -3344,7 +3366,11 @@ async def cb_ms_toggle(c: CallbackQuery):
             sel.remove(gid)
         else:
             sel.add(gid)
-        groups = await resolve_group_titles()
+        
+        # Faqat ruxsat etilgan guruhlarni olish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        groups = await resolve_group_titles(allowed_groups)
+        
         kb = multi_select_kb(pid, groups, sel, state.get("start_iso"))
         msg = await c.message.answer("✅ Yangilandi. Davom eting:", reply_markup=kb)
         if pid in ADMIN_MESSAGES:
@@ -3356,7 +3382,7 @@ async def cb_ms_toggle(c: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("ms_confirm:"))
 async def cb_ms_confirm(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")
@@ -3384,6 +3410,13 @@ async def cb_ms_confirm(c: CallbackQuery):
         selected: set[int] = set(state.get("selected", set()))
         if not selected:
             return await c.answer("Hech bo'lmaganda bitta guruhni tanlang.", show_alert=True)
+        
+        # Tanlangan barcha guruhlarning ruxsatini tekshirish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        for gid in selected:
+            if gid not in allowed_groups:
+                return await c.answer(f"❌ Sizga guruh {gid}ga ruxsat yo'q!", show_alert=True)
+        
         primary_gid = list(selected)[0]
         await upsert_user(uid=user_id, username=username, full_name=full_name, group_id=primary_gid, expires_at=expires_at)
         await set_payment_status(pid, "approved", c.from_user.id)
@@ -3472,7 +3505,7 @@ async def cb_ms_confirm(c: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("pick_group:"))
 async def cb_pick_group(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")
@@ -3481,6 +3514,11 @@ async def cb_pick_group(c: CallbackQuery):
             gid = int(parts[2])
         except Exception:
             return await c.answer("Xatolik: noto'g'ri callback.", show_alert=True)
+        
+        # Guruh ruxsatini tekshirish
+        if not await check_group_access(c.from_user.id, gid):
+            return await c.answer("❌ Sizga bu guruhga ruxsat yo'q!", show_alert=True)
+        
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
@@ -3876,11 +3914,16 @@ async def cb_contract_decline(c: CallbackQuery):
 @dp.callback_query(F.data.startswith("reg_approve_now:"))
 async def cb_reg_approve_now(c: CallbackQuery):
     """Bugundan tasdiqlash - 30 kunlik obuna."""
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
     try:
         user_id = int(c.data.split(":")[1])
+        
+        # Admin'ning ruxsat etilgan guruhlarini olish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        if not allowed_groups:
+            return await c.answer("❌ Sizga hech qanday guruhga ruxsat yo'q!", show_alert=True)
         
         # 30 kunlik obuna bugundan
         start_dt = datetime.utcnow()
@@ -3891,40 +3934,37 @@ async def cb_reg_approve_now(c: CallbackQuery):
         username, fullname = await fetch_user_profile(user_id)
         phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
         
-        # Birinchi guruhga qo'shish (primary)
-        if GROUP_IDS:
-            primary_gid = GROUP_IDS[0]
-            await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
-            
-            human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
-            
-            # User'ga xabar
-            try:
-                await bot.send_message(
-                    user_id,
-                    f"✅ *Tabriklaymiz! Ro'yxatdan o'tdingiz!*\n\n"
-                    f"📅 Obuna: {SUBSCRIPTION_DAYS} kun\n"
-                    f"⏳ Tugash sanasi: {human_exp}\n\n"
-                    f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to notify user {user_id}: {e}")
-            
-            # Admin'ga xabar
-            await c.message.edit_text(
-                f"✅ *TASDIQLANDI*\n\n"
-                f"👤 {fullname}\n"
-                f"📞 Telefon: {phone}\n"
-                f"📅 Obuna: bugundan {SUBSCRIPTION_DAYS} kun\n"
-                f"⏳ Tugash: {human_exp}",
+        # Adminning birinchi ruxsat etilgan guruhiga qo'shish (primary)
+        primary_gid = allowed_groups[0]
+        await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
+        
+        human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        
+        # User'ga xabar
+        try:
+            await bot.send_message(
+                user_id,
+                f"✅ *Tabriklaymiz! Ro'yxatdan o'tdingiz!*\n\n"
+                f"📅 Obuna: {SUBSCRIPTION_DAYS} kun\n"
+                f"⏳ Tugash sanasi: {human_exp}\n\n"
+                f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
                 parse_mode="Markdown"
             )
-            await c.answer("✅ Tasdiqlandi!")
-            
-            logger.info(f"Registration approved for user {user_id} by admin {c.from_user.id}")
-        else:
-            await c.answer("❗ Guruhlar topilmadi", show_alert=True)
+        except Exception as e:
+            logger.warning(f"Failed to notify user {user_id}: {e}")
+        
+        # Admin'ga xabar
+        await c.message.edit_text(
+            f"✅ *TASDIQLANDI*\n\n"
+            f"👤 {fullname}\n"
+            f"📞 Telefon: {phone}\n"
+            f"📅 Obuna: bugundan {SUBSCRIPTION_DAYS} kun\n"
+            f"⏳ Tugash: {human_exp}",
+            parse_mode="Markdown"
+        )
+        await c.answer("✅ Tasdiqlandi!")
+        
+        logger.info(f"Registration approved for user {user_id} by admin {c.from_user.id}")
             
     except Exception as e:
         logger.error(f"Error in cb_reg_approve_now: {e}")
@@ -3933,11 +3973,16 @@ async def cb_reg_approve_now(c: CallbackQuery):
 @dp.callback_query(F.data.startswith("reg_approve_date:"))
 async def cb_reg_approve_date(c: CallbackQuery):
     """Sana tanlash uchun."""
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
     try:
         user_id = int(c.data.split(":")[1])
+        
+        # Admin'ning ruxsat etilgan guruhlarini tekshirish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        if not allowed_groups:
+            return await c.answer("❌ Sizga hech qanday guruhga ruxsat yo'q!", show_alert=True)
         
         # Admin'dan sanani so'rash
         WAIT_DATE_FOR[c.from_user.id] = user_id  # User ID ni payment ID o'rniga ishlatamiz
@@ -3957,7 +4002,7 @@ async def cb_reg_approve_date(c: CallbackQuery):
 @dp.callback_query(F.data.startswith("reg_reject:"))
 async def cb_reg_reject(c: CallbackQuery):
     """Ro'yxatdan o'tishni rad etish."""
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     
     try:
