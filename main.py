@@ -218,7 +218,10 @@ CREATE TABLE IF NOT EXISTS admins(
     created_at BIGINT NOT NULL,
     expires_at BIGINT,
     created_by BIGINT,
-    managed_groups BIGINT[]
+    managed_groups BIGINT[],
+    max_groups INTEGER DEFAULT -1,
+    tariff TEXT,
+    last_warning_sent_at BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_id);
 CREATE INDEX IF NOT EXISTS idx_users_expires ON users(expires_at);
@@ -247,6 +250,31 @@ async def db_init():
                 logger.info("Migration: course_name column added/verified")
             except Exception as me:
                 logger.warning(f"Migration warning (likely already exists): {me}")
+            
+            # Migration: admins jadvalidagi yangi ustunlarni qo'shish
+            try:
+                await conn.execute("""
+                    ALTER TABLE admins ADD COLUMN IF NOT EXISTS max_groups INTEGER DEFAULT -1;
+                """)
+                logger.info("Migration: max_groups column added/verified")
+            except Exception as me:
+                logger.warning(f"Migration warning: {me}")
+            
+            try:
+                await conn.execute("""
+                    ALTER TABLE admins ADD COLUMN IF NOT EXISTS tariff TEXT;
+                """)
+                logger.info("Migration: tariff column added/verified")
+            except Exception as me:
+                logger.warning(f"Migration warning: {me}")
+            
+            try:
+                await conn.execute("""
+                    ALTER TABLE admins ADD COLUMN IF NOT EXISTS last_warning_sent_at BIGINT;
+                """)
+                logger.info("Migration: last_warning_sent_at column added/verified")
+            except Exception as me:
+                logger.warning(f"Migration warning: {me}")
             
             # Default shartnoma matnini qo'shish (agar yo'q bo'lsa)
             count = await conn.fetchval("SELECT COUNT(*) FROM contract_templates")
