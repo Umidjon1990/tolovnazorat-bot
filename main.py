@@ -643,6 +643,182 @@ async def cmd_groups(m: Message):
     txt = "🔗 Ulangan guruhlar:\n" + "\n".join([f"• {t} — {gid}" for gid, t in rows])
     await m.answer(txt)
 
+@dp.message(Command("bulk_add"))
+async def cmd_bulk_add(m: Message):
+    """Guruhning barcha a'zolarini bir vaqtda ro'yxatdan o'tkazish.
+    
+    Foydalanish:
+    - /bulk_add  yoki  /bulk_add now  - bugundan 30 kun
+    - /bulk_add 2025-11-01  - belgilangan sanadan 30 kun
+    """
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    # Faqat guruhlarda ishlaydi
+    if m.chat.type not in ("group", "supergroup"):
+        return await m.answer("❗ Bu buyruq faqat guruhlarda ishlaydi.")
+    
+    group_id = m.chat.id
+    
+    try:
+        # Sana parametrini tekshirish
+        parts = m.text.split(maxsplit=1)
+        start_date = datetime.utcnow()
+        
+        if len(parts) > 1 and parts[1].strip().lower() != "now":
+            # Sana kiritilgan
+            date_str = parts[1].strip().replace("/", "-")
+            if not DATE_RE.match(date_str):
+                return await m.answer("❗ Format noto'g'ri. To'g'ri ko'rinish: /bulk_add 2025-11-01")
+            try:
+                start_date = datetime.strptime(date_str, "%Y-%m-%d")
+            except Exception:
+                return await m.answer("❗ Sana tushunilmadi. Misol: /bulk_add 2025-11-01")
+        
+        # Obuna tugash sanasini hisoblash
+        expires_at = int((start_date + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+        human_start = (start_date + TZ_OFFSET).strftime("%Y-%m-%d")
+        human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        
+        # Jarayonni boshlash xabari
+        processing_msg = await m.answer("⏳ Guruh a'zolari tekshirilmoqda...")
+        
+        # Guruhning barcha a'zolarini olish
+        added_count = 0
+        already_count = 0
+        skipped_count = 0
+        
+        # Telegram API orqali guruh a'zolarini olish (admin count API'dan boshlaymiz)
+        try:
+            chat_member_count = await bot.get_chat_member_count(group_id)
+            await processing_msg.edit_text(f"⏳ Guruhda {chat_member_count} a'zo topildi. Tekshirilmoqda...")
+        except Exception:
+            pass
+        
+        # Guruh a'zolarini olish uchun ChatMemberAdministrator va oddiy a'zolarni olishimiz kerak
+        # Lekin Telegram Bot API bu funksiyani to'liq qo'llab-quvvatlamaydi (premium feature)
+        # Shuning uchun biz mavjud database'dagi foydalanuvchilarni tekshiramiz
+        
+        # Alternative yechim: Guruhda yozgan har bir foydalanuvchini tracking qilish o'rniga
+        # Admin manual ravishda user ID'larni kiritishi mumkin
+        
+        await processing_msg.edit_text(
+            "ℹ️ *Telegram Bot API cheklovi*\n\n"
+            "Afsuski, Telegram Bot API guruhning barcha a'zolari ro'yxatini olishga ruxsat bermaydi (bu premium feature).\n\n"
+            "*Alternativ yechimlar:*\n\n"
+            "1️⃣ *Har bir foydalanuvchini alohida qo'shish:*\n"
+            "   `/add_user USER_ID 2025-11-01`\n"
+            "   Misol: `/add_user 123456789 now`\n\n"
+            "2️⃣ *Guruhda xabar yozishlarini kutish:*\n"
+            "   Guruh a'zolari xabar yozganda bot avtomatik tracker qiladi\n\n"
+            "3️⃣ *Telegram Desktop orqali:*\n"
+            "   Guruh a'zolari ro'yxatini ko'chirib, har birini `/add_user` bilan qo'shing\n\n"
+            "Men sizga `/add_user` commandini yaratib beraman - bir nechta foydalanuvchini tez qo'shish uchun.",
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_bulk_add: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
+@dp.message(Command("add_user"))
+async def cmd_add_user(m: Message):
+    """Foydalanuvchini qo'lda obunaga qo'shish.
+    
+    Foydalanish:
+    - /add_user USER_ID  yoki  /add_user USER_ID now  - bugundan 30 kun
+    - /add_user USER_ID 2025-11-01  - belgilangan sanadan 30 kun
+    
+    Misol:
+    - /add_user 123456789 now
+    - /add_user 987654321 2025-11-15
+    """
+    if not is_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        # Parametrlarni parsing qilish
+        parts = m.text.split()
+        
+        if len(parts) < 2:
+            return await m.answer(
+                "❗ *Foydalanish:*\n\n"
+                "`/add_user USER_ID [SANA]`\n\n"
+                "*Misollar:*\n"
+                "• `/add_user 123456789` - bugundan 30 kun\n"
+                "• `/add_user 123456789 now` - bugundan 30 kun\n"
+                "• `/add_user 123456789 2025-11-15` - belgilangan sanadan 30 kun",
+                parse_mode="Markdown"
+            )
+        
+        # User ID
+        try:
+            user_id = int(parts[1])
+        except ValueError:
+            return await m.answer("❗ User ID raqam bo'lishi kerak.\n\nMisol: `/add_user 123456789 now`", parse_mode="Markdown")
+        
+        # Sana (agar kiritilgan bo'lsa)
+        start_date = datetime.utcnow()
+        
+        if len(parts) > 2 and parts[2].strip().lower() != "now":
+            date_str = parts[2].strip().replace("/", "-")
+            if not DATE_RE.match(date_str):
+                return await m.answer("❗ Format noto'g'ri. To'g'ri ko'rinish: 2025-11-01")
+            try:
+                start_date = datetime.strptime(date_str, "%Y-%m-%d")
+            except Exception:
+                return await m.answer("❗ Sana tushunilmadi. Misol: 2025-11-01")
+        
+        # Obuna tugash sanasini hisoblash
+        expires_at = int((start_date + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+        human_start = (start_date + TZ_OFFSET).strftime("%Y-%m-%d")
+        human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+        
+        # Foydalanuvchi ma'lumotlarini olish
+        username, fullname = await fetch_user_profile(user_id)
+        
+        # Birinchi guruhga qo'shish
+        if not GROUP_IDS:
+            return await m.answer("❗ Guruhlar topilmadi. PRIVATE_GROUP_ID ni sozlang.")
+        
+        primary_gid = GROUP_IDS[0]
+        
+        # Database'ga qo'shish
+        await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
+        
+        # User'ga xabar yuborish (agar mumkin bo'lsa)
+        try:
+            await bot.send_message(
+                user_id,
+                f"✅ *Tabriklaymiz! Obuna faollashtirildi!*\n\n"
+                f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun\n"
+                f"⏳ Tugash sanasi: {human_exp}\n\n"
+                f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
+                parse_mode="Markdown"
+            )
+            user_notified = "✅ Foydalanuvchiga xabar yuborildi"
+        except Exception as e:
+            logger.warning(f"Failed to notify user {user_id}: {e}")
+            user_notified = "⚠️ Foydalanuvchiga xabar yuborib bo'lmadi (bot bilan chat ochilmagan)"
+        
+        # Admin'ga tasdiqlash
+        await m.answer(
+            f"✅ *FOYDALANUVCHI QO'SHILDI*\n\n"
+            f"👤 {fullname}\n"
+            f"🆔 User ID: `{user_id}`\n"
+            f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun\n"
+            f"⏳ Tugash: {human_exp}\n"
+            f"🏷 Guruh: {primary_gid}\n\n"
+            f"{user_notified}",
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"User {user_id} manually added by admin {m.from_user.id} with subscription until {human_exp}")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_add_user: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
 @dp.message(Command("stats"))
 async def cmd_stats(m: Message):
     if not is_admin(m.from_user.id):
