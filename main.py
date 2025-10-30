@@ -933,30 +933,32 @@ async def cmd_add_users(m: Message):
         # Muvaffaqiyatli qo'shilganlar
         if added_users:
             success_lines = [
-                f"✅ *{len(added_users)} TA FOYDALANUVCHI QO'SHILDI*\n",
+                f"✅ <b>{len(added_users)} TA FOYDALANUVCHI QOSHILDI</b>\n",
                 f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun",
                 f"⏳ Tugash: {human_exp}",
                 f"🏷 Guruh: {primary_gid}\n"
             ]
             
             for user_id, fullname in added_users[:20]:
-                success_lines.append(f"• {fullname or f'User{user_id}'} (ID: `{user_id}`)")
+                safe_name = (fullname or f'User{user_id}').replace('<', '&lt;').replace('>', '&gt;')
+                success_lines.append(f"• {safe_name} (ID: <code>{user_id}</code>)")
             
             if len(added_users) > 20:
                 success_lines.append(f"... va yana {len(added_users) - 20} ta")
             
-            await m.answer("\n".join(success_lines), parse_mode="Markdown")
+            await m.answer("\n".join(success_lines), parse_mode="HTML")
         
         # Xato bo'lganlar
         if failed_users:
-            error_lines = [f"❌ *{len(failed_users)} TA XATOLIK*\n"]
+            error_lines = [f"❌ <b>{len(failed_users)} TA XATOLIK</b>\n"]
             for user_id, error in failed_users[:10]:
-                error_lines.append(f"• User {user_id}: {error}")
+                safe_error = str(error).replace('<', '&lt;').replace('>', '&gt;')
+                error_lines.append(f"• User {user_id}: {safe_error}")
             
             if len(failed_users) > 10:
                 error_lines.append(f"... va yana {len(failed_users) - 10} ta")
             
-            await m.answer("\n".join(error_lines), parse_mode="Markdown")
+            await m.answer("\n".join(error_lines), parse_mode="HTML")
         
     except Exception as e:
         logger.error(f"Error in cmd_add_users: {e}")
@@ -1043,39 +1045,40 @@ async def cmd_unregistered(m: Message):
         # Xabarni shakllantirish
         await processing_msg.delete()
         
-        header = f"⚠️ *OBUNA BELGILANMAGANLAR*\n\nJami: {len(unregistered_users)} ta\n"
-        await m.answer(header, parse_mode="Markdown")
+        header = f"⚠️ <b>OBUNA BELGILANMAGANLAR</b>\n\nJami: {len(unregistered_users)} ta\n"
+        await m.answer(header, parse_mode="HTML")
         
         for gid, users_list in groups_dict.items():
             gtitle = titles.get(gid, f"Guruh {gid}")
-            lines = [f"🏷 *{gtitle}* — {len(users_list)} ta\n"]
+            lines = [f"🏷 <b>{gtitle}</b> — {len(users_list)} ta\n"]
             
             for i, user_info in enumerate(users_list[:40], start=1):
                 name = user_info['fullname'] or f"User{user_info['user_id']}"
+                safe_name = name.replace('<', '&lt;').replace('>', '&gt;')
                 username = user_info['username']
-                user_tag = f"@{username}" if username else name
+                user_tag = f"@{username}" if username else safe_name
                 phone = user_info.get('phone', '')
                 phone_str = f" 📞 {phone}" if phone else ""
                 reason = user_info['reason']
                 
                 lines.append(f"{i}. {user_tag}{phone_str}")
-                lines.append(f"   • ID: `{user_info['user_id']}`")
+                lines.append(f"   • ID: <code>{user_info['user_id']}</code>")
                 lines.append(f"   • Holat: {reason}\n")
             
             if len(users_list) > 40:
                 lines.append(f"... va yana {len(users_list) - 40} ta")
             
-            await m.answer("\n".join(lines), parse_mode="Markdown")
+            await m.answer("\n".join(lines), parse_mode="HTML")
         
         # Yordam xabari
         help_text = (
-            "💡 *Qanday qilib qo'shish mumkin?*\n\n"
+            "💡 <b>Qanday qilib qoshish mumkin?</b>\n\n"
             "1️⃣ Har birini alohida:\n"
-            "   `/add_user USER_ID now`\n\n"
-            "2️⃣ Ularga bot orqali ro'yxatdan o'tishni aytish:\n"
-            "   Botga /start bosing va ma'lumotlaringizni kiriting"
+            "   <code>/add_user USER_ID now</code>\n\n"
+            "2️⃣ Ularga bot orqali royxatdan otishni aytish:\n"
+            "   Botga /start bosing va malumotlaringizni kiriting"
         )
-        await m.answer(help_text, parse_mode="Markdown")
+        await m.answer(help_text, parse_mode="HTML")
         
         logger.info(f"Admin {m.from_user.id} checked unregistered users: {len(unregistered_users)} found")
         
