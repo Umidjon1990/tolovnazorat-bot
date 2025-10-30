@@ -3726,6 +3726,11 @@ async def cb_warn_paid(c: CallbackQuery):
     try:
         parts = c.data.split(":")
         uid = int(parts[1]); gid = int(parts[2])
+        
+        # Guruh ruxsatini tekshirish
+        if not await check_group_access(c.from_user.id, gid):
+            return await c.answer("❌ Sizga bu guruhga ruxsat yo'q!", show_alert=True)
+        
         new_exp = int((datetime.utcnow() + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
         await update_user_expiry(uid, new_exp)
         await add_user_group(uid, gid, new_exp)
@@ -3748,6 +3753,11 @@ async def cb_warn_notpaid(c: CallbackQuery):
     try:
         parts = c.data.split(":")
         uid = int(parts[1]); gid = int(parts[2])
+        
+        # Guruh ruxsatini tekshirish
+        if not await check_group_access(c.from_user.id, gid):
+            return await c.answer("❌ Sizga bu guruhga ruxsat yo'q!", show_alert=True)
+        
         key = (uid, gid)
         count = NOT_PAID_COUNTER.get(key, 0) + 1
         NOT_PAID_COUNTER[key] = count
@@ -3783,11 +3793,16 @@ async def cb_warn_notpaid(c: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("warn_kick:"))
 async def cb_warn_kick(c: CallbackQuery):
-    if not is_admin(c.from_user.id):
+    if not await is_active_admin(c.from_user.id):
         return await c.answer("Faqat adminlar uchun", show_alert=True)
     try:
         parts = c.data.split(":")
         uid = int(parts[1]); gid = int(parts[2])
+        
+        # Guruh ruxsatini tekshirish
+        if not await check_group_access(c.from_user.id, gid):
+            return await c.answer("❌ Sizga bu guruhga ruxsat yo'q!", show_alert=True)
+        
         try:
             member = await bot.get_chat_member(gid, uid)
             if member.status in ("administrator", "creator"):
