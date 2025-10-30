@@ -529,24 +529,21 @@ async def cmd_start(m: Message):
             )
             return
         
-        # Oddiy foydalanuvchilar uchun shartnoma va Mini App tugmasi
-        keyboard = contract_keyboard()
+        # Oddiy foydalanuvchilar uchun - ism-familiya so'rash
+        WAIT_FULLNAME_FOR.add(m.from_user.id)
         
-        # Agar Mini App URL o'rnatilgan bo'lsa, tugma qo'shamiz
-        if MINI_APP_URL:
-            webapp_button = InlineKeyboardButton(
-                text="📱 Ilovani ochish",
-                web_app=WebAppInfo(url=MINI_APP_URL)
-            )
-            # Mavjud tugmalar ustiga qo'shamiz
-            keyboard.inline_keyboard.insert(0, [webapp_button])
+        await m.answer(
+            "👋 *Xush kelibsiz!*\n\n"
+            "📝 Iltimos, *to'liq ismingizni* (Ism Familiya) kiriting:\n\n"
+            "Misol: Ali Valiyev",
+            parse_mode="Markdown"
+        )
         
-        await m.answer("📄 *ONLAYN O'QUV SHARTNOMA*\n\n" + CONTRACT_TEXT, reply_markup=keyboard, parse_mode="Markdown")
-        uname, full = await fetch_user_profile(m.from_user.id)
-        await upsert_user(m.from_user.id, uname, full, group_id=0, expires_at=0)
+        logger.info(f"User {m.from_user.id} started registration - waiting for fullname")
+        
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}")
-        await m.answer("Xabolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+        await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
 
 @dp.callback_query(F.data == "terms_agree")
 async def cb_terms_agree(c: CallbackQuery):
@@ -1124,6 +1121,35 @@ async def admin_cleanup_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
+    # Ism-familiya qabul qilish (yangi ro'yxatdan o'tish tizimi)
+    if m.from_user.id in WAIT_FULLNAME_FOR:
+        try:
+            fullname = (m.text or "").strip()
+            if len(fullname) < 3:
+                return await m.answer("❗ Iltimos, to'liq ismingizni kiriting (kamida 3 ta harf)")
+            
+            # Ism-familiyani saqlash
+            await update_user_fullname(m.from_user.id, fullname)
+            WAIT_FULLNAME_FOR.discard(m.from_user.id)
+            WAIT_CONTACT_FOR.add(m.from_user.id)
+            
+            # Telefon so'rash
+            await m.answer(
+                "✅ Ismingiz qabul qilindi!\n\n"
+                "📞 Endi *telefon raqamingizni* yuboring:\n\n"
+                "Tugmani bosib yuboring yoki matn sifatida kiriting:\n"
+                "Misol: +998901234567",
+                reply_markup=contact_keyboard(),
+                parse_mode="Markdown"
+            )
+            
+            logger.info(f"User {m.from_user.id} provided fullname: {fullname}, now waiting for phone")
+            
+        except Exception as e:
+            logger.error(f"Error processing fullname: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+        return
+    
     # Sana kiritish (to'lov tasdiqlash uchun)
     if m.from_user.id in WAIT_DATE_FOR:
         try:
@@ -1152,23 +1178,47 @@ async def on_admin_date_handler(m: Message):
                 await update_user_phone(m.from_user.id, phone)
                 WAIT_CONTACT_FOR.discard(m.from_user.id)
                 
-                full_name = (m.from_user.first_name or "") + (" " + (m.from_user.last_name or "") if m.from_user.last_name else "")
-                full_name = full_name.strip() or f"User{m.from_user.id}"
-                await update_user_fullname(m.from_user.id, full_name)
+                # User ma'lumotlarini olish
+                user_row = await get_user(m.from_user.id)
+                fullname = user_row[3] if user_row and len(user_row) > 3 else f"User{m.from_user.id}"
+                username, _ = await fetch_user_profile(m.from_user.id)
                 
-                txt_buf, pdf_buf = build_contract_files(full_name, phone)
-                try:
-                    await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
-                    if pdf_buf:
-                        await bot.send_document(m.from_user.id, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
-                    logger.info(f"Contract documents sent to user {m.from_user.id}")
-                except Exception as e:
-                    logger.error(f"Failed to send contract documents to user: {e}")
+                # User'ga tasdiqlash kutilayotgani haqida xabar
+                await m.answer(
+                    "✅ *Ro'yxatdan o'tish so'rovi yuborildi!*\n\n"
+                    "⏳ Admin tasdiqlashini kuting.\n"
+                    "Tez orada xabar beramiz!",
+                    parse_mode="Markdown"
+                )
                 
-                # Shartnoma admin'ga yuborilmaydi (faqat to'lov cheki yetarli)
-                logger.info(f"Contract generated for user {m.from_user.id}, not sent to admins")
+                # Admin'ga tasdiqlash so'rovi yuborish
+                chat_link = f"📧 [{username}](tg://user?id={m.from_user.id})" if username else f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
                 
-                await m.answer("✅ Telefon raqam qabul qilindi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
+                for admin_id in ADMIN_IDS:
+                    try:
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Bugundan tasdiqlash", callback_data=f"reg_approve_now:{m.from_user.id}")],
+                            [InlineKeyboardButton(text="📅 Sana tanlash", callback_data=f"reg_approve_date:{m.from_user.id}")],
+                            [InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reg_reject:{m.from_user.id}")]
+                        ])
+                        
+                        await bot.send_message(
+                            admin_id,
+                            f"📝 *YANGI RO'YXATDAN O'TISH SO'ROVI*\n\n"
+                            f"👤 {fullname}\n"
+                            f"{chat_link}\n"
+                            f"📞 Telefon: {phone}\n"
+                            f"🆔 User ID: `{m.from_user.id}`\n\n"
+                            f"Admin, tasdiqlaysizmi?",
+                            reply_markup=kb,
+                            parse_mode="Markdown"
+                        )
+                        
+                        logger.info(f"Registration request sent to admin {admin_id} for user {m.from_user.id}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to send registration request to admin {admin_id}: {e}")
+                
             except Exception as e:
                 logger.error(f"Error processing phone text: {e}")
                 await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
@@ -1184,31 +1234,47 @@ async def on_contact(m: Message):
         await update_user_phone(m.from_user.id, phone)
         WAIT_CONTACT_FOR.discard(m.from_user.id)
         
-        full_name = ""
-        if contact.first_name:
-            full_name = contact.first_name
-            if contact.last_name:
-                full_name += " " + contact.last_name
-        if not full_name:
-            full_name = (m.from_user.first_name or "") + (" " + (m.from_user.last_name or "") if m.from_user.last_name else "")
-            full_name = full_name.strip()
-        if not full_name:
-            full_name = f"User{m.from_user.id}"
-        await update_user_fullname(m.from_user.id, full_name)
+        # User ma'lumotlarini database'dan olish
+        user_row = await get_user(m.from_user.id)
+        fullname = user_row[3] if user_row and len(user_row) > 3 else f"User{m.from_user.id}"
+        username, _ = await fetch_user_profile(m.from_user.id)
         
-        txt_buf, pdf_buf = build_contract_files(full_name, phone)
-        try:
-            await bot.send_document(m.from_user.id, BufferedInputFile(txt_buf.getvalue(), filename="shartnoma.txt"))
-            if pdf_buf:
-                await bot.send_document(m.from_user.id, BufferedInputFile(pdf_buf.getvalue(), filename="shartnoma.pdf"))
-            logger.info(f"Contract documents sent to user {m.from_user.id}")
-        except Exception as e:
-            logger.error(f"Failed to send contract documents to user: {e}")
+        # User'ga tasdiqlash kutilayotgani haqida xabar
+        await m.answer(
+            "✅ *Ro'yxatdan o'tish so'rovi yuborildi!*\n\n"
+            "⏳ Admin tasdiqlashini kuting.\n"
+            "Tez orada xabar beramiz!",
+            parse_mode="Markdown"
+        )
         
-        # Shartnoma admin'ga yuborilmaydi (faqat to'lov cheki yetarli)
-        logger.info(f"Contract generated for user {m.from_user.id}, not sent to admins")
+        # Admin'ga tasdiqlash so'rovi yuborish
+        chat_link = f"📧 [{username}](tg://user?id={m.from_user.id})" if username else f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
         
-        await m.answer("✅ Telefon raqam qabul qilindi. Endi to'lov turini tanlang:", reply_markup=start_keyboard())
+        for admin_id in ADMIN_IDS:
+            try:
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Bugundan tasdiqlash", callback_data=f"reg_approve_now:{m.from_user.id}")],
+                    [InlineKeyboardButton(text="📅 Sana tanlash", callback_data=f"reg_approve_date:{m.from_user.id}")],
+                    [InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reg_reject:{m.from_user.id}")]
+                ])
+                
+                await bot.send_message(
+                    admin_id,
+                    f"📝 *YANGI RO'YXATDAN O'TISH SO'ROVI*\n\n"
+                    f"👤 {fullname}\n"
+                    f"{chat_link}\n"
+                    f"📞 Telefon: {phone}\n"
+                    f"🆔 User ID: `{m.from_user.id}`\n\n"
+                    f"Admin, tasdiqlaysizmi?",
+                    reply_markup=kb,
+                    parse_mode="Markdown"
+                )
+                
+                logger.info(f"Registration request sent to admin {admin_id} for user {m.from_user.id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to send registration request to admin {admin_id}: {e}")
+        
     except Exception as e:
         logger.error(f"Error in on_contact: {e}")
         await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
