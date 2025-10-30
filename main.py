@@ -2261,7 +2261,8 @@ async def main():
     asyncio.create_task(auto_kick_loop())
     logger.info("Bot is now polling for updates")
     try:
-        await dp.start_polling(bot)
+        # chat_member update'larini qabul qilish uchun allowed_updates qo'shildi
+        await dp.start_polling(bot, allowed_updates=["message", "callback_query", "chat_member"])
     finally:
         if db_pool:
             await db_pool.close()
