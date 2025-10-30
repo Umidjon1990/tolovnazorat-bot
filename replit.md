@@ -21,12 +21,20 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 ## Data Storage
 - **Database**: PostgreSQL with asyncpg (async driver).
 - **Design**: Production-ready relational database with connection pooling (2-10 connections) for performance.
-- **Tables**: `users` (core info, subscription details, `course_name`), `payments` (records, approval status), `user_groups` (many-to-many group access).
+- **Tables**: 
+  - `users` (core info, subscription details, `course_name`)
+  - `payments` (records, approval status)
+  - `user_groups` (many-to-many group access)
+  - `contract_templates` (editable contract text with history)
+  - **`groups`** (database-driven group management for multi-tenant support)
 
 ## Configuration Management
-- **Approach**: Environment variables loaded via python-dotenv.
-- **Key Settings**: `BOT_TOKEN`, `DATABASE_URL`, `ADMIN_IDS`, `PRIVATE_GROUP_ID`, `SUBSCRIPTION_DAYS`, `INVITE_LINK_EXPIRE_HOURS`, `REMIND_DAYS`.
-- **Validation**: Startup checks for critical configurations.
+- **Approach**: Hybrid - critical secrets in environment variables, dynamic data in database.
+- **Environment Variables** (immutable): `BOT_TOKEN`, `DATABASE_URL`, `ADMIN_IDS`.
+- **Database-Driven** (dynamic): Groups management via `groups` table - no Railway dashboard access needed.
+- **Legacy Support**: `PRIVATE_GROUP_ID` auto-migrates to database on first startup.
+- **Other Settings**: `SUBSCRIPTION_DAYS`, `INVITE_LINK_EXPIRE_HOURS`, `REMIND_DAYS` (environment variables).
+- **Multi-Tenant Ready**: Admins can add/remove groups via bot commands without code changes or redeployment.
 
 ## Access Control
 - **Admin System**: Role-based access using user ID whitelist.
@@ -44,16 +52,24 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **User Feedback**: Informative error messages.
 
 ## Bot Features
-- **User Flow**: Contract acceptance, course selection, phone input, payment submission, admin approval, and group membership.
+- **User Flow**: Contract acceptance, name/phone input, admin approval with date selection, and group membership.
+- **Security**: Group membership validation - only users in configured groups can register.
 - **Admin Commands**: 
   - `/myid` - User's Telegram ID
-  - `/groups` - List configured groups
-  - `/stats` - Overall statistics
-  - `/gstats` - Detailed group statistics
-  - `/add_user USER_ID [DATE]` - Manually add single user to subscription (bugundan or YYYY-MM-DD)
-  - `/add_users ID1 ID2 ID3 ... [DATE]` - Bulk add multiple users with same date (YANGI!)
-  - `/unregistered` - Show users in group without active subscription (link orqali kirganlar va ro'yxatdan o'tmaganlar)
-  - `/bulk_add` - Info about Telegram API limitations for bulk registration
+  - **Groups Management** (Multi-Tenant Ready):
+    - `/groups` - List all groups from database
+    - `/add_group GROUP_ID [NAME]` - Add new group (no Railway access needed!)
+    - `/remove_group GROUP_ID` - Remove group
+  - **Statistics**:
+    - `/stats` - Overall statistics
+    - `/gstats` - Detailed group statistics
+    - "👥 Guruh o'quvchilari" button - View all users by group with details
+  - **User Management**:
+    - `/add_user USER_ID [DATE]` - Manually add single user (bugundan or YYYY-MM-DD)
+    - `/add_users ID1 ID2 ID3 ... [DATE]` - Bulk add multiple users
+    - `/unregistered` - Show users in group without active subscription
+  - **Contract Management**:
+    - `/edit_contract` - Update contract template (text or file)
   - Payment approval and subscription management via inline buttons
 - **Automation**: Auto-kick loop, subscription expiry warnings with action buttons (runs every 60 seconds).
 
