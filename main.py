@@ -964,18 +964,18 @@ async def cmd_add_users(m: Message):
 
 @dp.message(Command("unregistered"))
 async def cmd_unregistered(m: Message):
-    """Guruhda obuna belgilanmagan foydalanuvchilarni ko'rsatish.
+    """Database'da obuna belgilanmagan foydalanuvchilarni ko'rsatish (tez versiya).
     
     Foydalanish:
-    - Guruhdagi barcha botga ma'lum userlarni tekshiradi
-    - Obuna yo'q yoki expires_at NULL bo'lganlarni ko'rsatadi
-    - Link orqali kirganlar va ro'yxatdan o'tmaganlarni aniqlaydi
+    - Database'dan foydalanuvchilarni oladi
+    - Obuna yo'q yoki tugaganlarni ko'rsatadi
+    - Telegram API'ga murojaat qilmaydi (tez ishlaydi)
     """
     if not is_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
     try:
-        processing_msg = await m.answer("⏳ Guruh a'zolari tekshirilmoqda...")
+        processing_msg = await m.answer("⏳ Database tekshirilmoqda...")
         
         now = int(datetime.utcnow().timestamp())
         unregistered_users = []
@@ -986,76 +986,46 @@ async def cmd_unregistered(m: Message):
         for gid in GROUP_IDS:
             # Database'dan guruhga tegishli barcha userlarni olish
             async with db_pool.acquire() as conn:
-                # users jadvalidan barcha userlarni olish
-                all_db_users = await conn.fetch(
-                    "SELECT DISTINCT user_id, username, full_name, phone FROM users"
-                )
-                
-                # user_groups jadvalidan ham tekshirish
-                user_groups_data = await conn.fetch(
-                    "SELECT DISTINCT user_id FROM user_groups WHERE group_id = $1", gid
-                )
+                # users jadvalidan obuna yo'q yoki tugaganlarni olish
+                query = """
+                    SELECT DISTINCT u.user_id, u.username, u.full_name, u.phone, u.expires_at
+                    FROM users u
+                    LEFT JOIN user_groups ug ON u.user_id = ug.user_id AND ug.group_id = $1
+                    WHERE u.group_id = $1 OR ug.user_id IS NOT NULL
+                """
+                all_users = await conn.fetch(query, gid)
             
-            # Database'dagi barcha user ID'larni yig'ish
-            db_user_ids = set()
-            for row in all_db_users:
-                db_user_ids.add(row['user_id'])
-            for row in user_groups_data:
-                db_user_ids.add(row['user_id'])
-            
-            # Har bir DB userini tekshirish
-            for user_id in db_user_ids:
-                # Guruhda mavjudligini tekshirish
-                try:
-                    member = await bot.get_chat_member(gid, user_id)
-                    if member.status not in ["member", "administrator", "creator"]:
-                        continue  # Guruhda emas
-                except Exception:
-                    continue  # API xatosi yoki guruhda emas
+            # Har bir userni tekshirish
+            for row in all_users:
+                user_id = row['user_id']
+                username = row['username']
+                fullname = row['full_name'] or f"User{user_id}"
+                phone = row['phone']
+                expires_at = row['expires_at']
                 
-                # Obuna ma'lumotlarini olish
-                user_row = await get_user(user_id)
-                if not user_row:
-                    # Database'da mavjud emas - guruhda bor, lekin hech qachon ro'yxatdan o'tmagan
-                    username, fullname = await fetch_user_profile(user_id)
+                # Obuna yo'q yoki tugagan
+                if not expires_at or expires_at == 0:
                     unregistered_users.append({
                         'user_id': user_id,
                         'username': username,
                         'fullname': fullname,
                         'group_id': gid,
-                        'reason': "Database'da mavjud emas",
+                        'phone': phone,
+                        'reason': 'Obuna belgilanmagan',
                         'expires_at': None
                     })
-                else:
-                    # Database'da bor, obuna holatini tekshirish
-                    expires_at = user_row[2] if len(user_row) > 2 else None
-                    username = user_row[3] if len(user_row) > 3 else None
-                    fullname = user_row[4] if len(user_row) > 4 else f"User{user_id}"
-                    phone = user_row[5] if len(user_row) > 5 else None
-                    
-                    # Obuna yo'q yoki tugagan
-                    if not expires_at or expires_at == 0:
-                        unregistered_users.append({
-                            'user_id': user_id,
-                            'username': username,
-                            'fullname': fullname,
-                            'group_id': gid,
-                            'phone': phone,
-                            'reason': 'Obuna belgilanmagan',
-                            'expires_at': None
-                        })
-                    elif expires_at < now:
-                        # Obuna tugagan
-                        exp_str, _ = human_left(expires_at)
-                        unregistered_users.append({
-                            'user_id': user_id,
-                            'username': username,
-                            'fullname': fullname,
-                            'group_id': gid,
-                            'phone': phone,
-                            'reason': f'Obuna tugagan ({exp_str})',
-                            'expires_at': expires_at
-                        })
+                elif expires_at < now:
+                    # Obuna tugagan
+                    exp_str, _ = human_left(expires_at)
+                    unregistered_users.append({
+                        'user_id': user_id,
+                        'username': username,
+                        'fullname': fullname,
+                        'group_id': gid,
+                        'phone': phone,
+                        'reason': f'Obuna tugagan ({exp_str})',
+                        'expires_at': expires_at
+                    })
         
         # Natijalarni ko'rsatish
         if not unregistered_users:
