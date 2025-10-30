@@ -837,7 +837,6 @@ def admin_reply_keyboard(uid: int) -> ReplyKeyboardMarkup:
     """Admin uchun doim ko'rinadigan tugmalar."""
     keyboard = [
         [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
-        [KeyboardButton(text="✅ Tasdiqlangan to'lovlar"), KeyboardButton(text="⏳ Kutilayotgan to'lovlar")],
     ]
     
     # Super admin uchun qo'shimcha tugmalar
@@ -888,12 +887,9 @@ async def cmd_start(m: Message):
         
         # Agar hech qaysi guruhda bo'lmasa
         if not member_groups:
-            groups_text = "\n".join([f"• {name}" for name in non_member_groups])
-            
             await m.answer(
                 "⚠️ <b>Botdan foydalanish uchun avval guruhga qo'shilishingiz kerak!</b>\n\n"
-                f"📚 <b>Mavjud guruhlar:</b>\n{groups_text}\n\n"
-                "✅ Guruhga qo'shilganingizdan so'ng qaytadan /start bosing.",
+                "📞 Admin bilan bog'laning.",
                 parse_mode="HTML"
             )
             logger.info(f"User {m.from_user.id} is not a member of any group - registration blocked")
