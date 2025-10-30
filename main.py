@@ -71,6 +71,7 @@ WAIT_DATE_FOR: dict[int, int] = {}
 MULTI_PICK: dict[int, dict] = {}
 WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
+WAIT_CONTRACT_CONFIRM: set[int] = set()
 WAIT_CONTRACT_EDIT: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 # Admin xabarlarini kuzatish (payment_id -> [message_ids])
@@ -1756,19 +1757,70 @@ async def on_admin_date_handler(m: Message):
             # Ism-familiyani saqlash
             await update_user_fullname(m.from_user.id, fullname)
             WAIT_FULLNAME_FOR.discard(m.from_user.id)
-            WAIT_CONTACT_FOR.add(m.from_user.id)
+            WAIT_CONTRACT_CONFIRM.add(m.from_user.id)
             
-            # Telefon so'rash
-            await m.answer(
-                "✅ Ismingiz qabul qilindi!\n\n"
-                "📞 Endi *telefon raqamingizni* yuboring:\n\n"
-                "Tugmani bosib yuboring yoki matn sifatida kiriting:\n"
-                "Misol: +998901234567",
-                reply_markup=contact_keyboard(),
-                parse_mode="Markdown"
-            )
+            # Shartnoma matnini olish va PDF yaratish
+            contract_text = await get_contract_template()
+            now_str = (datetime.utcnow() + TZ_OFFSET).strftime("%Y-%m-%d")
             
-            logger.info(f"User {m.from_user.id} provided fullname: {fullname}, now waiting for phone")
+            # Shartnomaga ism va sanani qo'shish
+            stamped_contract = f"{contract_text}\n\n{'='*50}\nO'quvchi: {fullname}\nSana: {now_str}"
+            
+            # PDF yaratish
+            try:
+                from reportlab.lib.pagesizes import A4
+                from reportlab.pdfgen import canvas
+                pdf_buf = io.BytesIO()
+                pdf_buf.name = "shartnoma.pdf"
+                c = canvas.Canvas(pdf_buf, pagesize=A4)
+                width, height = A4
+                y = height - 40
+                for line in stamped_contract.splitlines():
+                    c.drawString(40, y, line[:110])
+                    y -= 14
+                    if y < 40:
+                        c.showPage()
+                        y = height - 40
+                c.save()
+                pdf_buf.seek(0)
+                
+                pdf_file = BufferedInputFile(pdf_buf.read(), filename="shartnoma.pdf")
+            except Exception as e:
+                logger.warning(f"Failed to create PDF contract: {e}")
+                pdf_file = None
+            
+            # Shartnoma tasdiqlash tugmalari
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Tasdiqlayman", callback_data="contract_agree")],
+                [InlineKeyboardButton(text="❌ Rad etaman", callback_data="contract_decline")]
+            ])
+            
+            # Shartnomani yuborish
+            if pdf_file:
+                await m.answer_document(
+                    pdf_file,
+                    caption=(
+                        f"📄 <b>SHARTNOMA</b>\n\n"
+                        f"👤 O'quvchi: {fullname}\n"
+                        f"📅 Sana: {now_str}\n\n"
+                        f"Iltimos, shartnomani o'qing va tasdiqlang."
+                    ),
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            else:
+                # PDF yaratilmasa, matn shaklida yuborish
+                short_contract = contract_text[:4000]  # Telegram limit
+                await m.answer(
+                    f"📄 <b>SHARTNOMA</b>\n\n{short_contract}\n\n"
+                    f"{'='*30}\n"
+                    f"👤 O'quvchi: {fullname}\n"
+                    f"📅 Sana: {now_str}",
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            
+            logger.info(f"User {m.from_user.id} provided fullname: {fullname}, now waiting for contract confirmation")
             
         except Exception as e:
             logger.error(f"Error processing fullname: {e}")
@@ -2801,6 +2853,51 @@ async def cb_warn_kick(c: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in cb_warn_kick: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
+
+# Shartnoma tasdiqlash callback'lari
+@dp.callback_query(F.data == "contract_agree")
+async def cb_contract_agree(c: CallbackQuery):
+    """Shartnoma tasdiqlash."""
+    if c.from_user.id not in WAIT_CONTRACT_CONFIRM:
+        return await c.answer("Sessiya topilmadi", show_alert=True)
+    
+    try:
+        # Shartnomani tasdiqlash
+        await update_user_agreed(c.from_user.id, int(datetime.utcnow().timestamp()))
+        WAIT_CONTRACT_CONFIRM.discard(c.from_user.id)
+        WAIT_CONTACT_FOR.add(c.from_user.id)
+        
+        # Telefon so'rash
+        await c.message.answer(
+            "✅ <b>Shartnoma tasdiqlandi!</b>\n\n"
+            "📞 Endi <b>telefon raqamingizni</b> yuboring:\n\n"
+            "Tugmani bosib yuboring yoki matn sifatida kiriting:\n"
+            "Misol: +998901234567",
+            reply_markup=contact_keyboard(),
+            parse_mode="HTML"
+        )
+        
+        await c.answer("✅ Tasdiqlandi!")
+        logger.info(f"User {c.from_user.id} agreed to contract, now waiting for phone")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_contract_agree: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data == "contract_decline")
+async def cb_contract_decline(c: CallbackQuery):
+    """Shartnomani rad etish."""
+    if c.from_user.id in WAIT_CONTRACT_CONFIRM:
+        WAIT_CONTRACT_CONFIRM.discard(c.from_user.id)
+    
+    await c.message.answer(
+        "❌ <b>Shartnoma rad etildi</b>\n\n"
+        "Xizmatlardan foydalanish uchun shartnomani tasdiqlash kerak.\n\n"
+        "Agar yana ro'yxatdan o'tmoqchi bo'lsangiz, /start bosing.",
+        parse_mode="HTML"
+    )
+    await c.answer()
+    logger.info(f"User {c.from_user.id} declined contract")
 
 # Yangi ro'yxatdan o'tish tasdiqlash callback'lari
 @dp.callback_query(F.data.startswith("reg_approve_now:"))
