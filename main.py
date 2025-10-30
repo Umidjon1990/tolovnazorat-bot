@@ -156,6 +156,12 @@ CREATE TABLE IF NOT EXISTS user_groups(
     expires_at BIGINT,
     PRIMARY KEY (user_id, group_id)
 );
+CREATE TABLE IF NOT EXISTS contract_templates(
+    id SERIAL PRIMARY KEY,
+    template_text TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_id);
 CREATE INDEX IF NOT EXISTS idx_users_expires ON users(expires_at);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
@@ -180,6 +186,16 @@ async def db_init():
                 logger.info("Migration: course_name column added/verified")
             except Exception as me:
                 logger.warning(f"Migration warning (likely already exists): {me}")
+            
+            # Default shartnoma matnini qo'shish (agar yo'q bo'lsa)
+            count = await conn.fetchval("SELECT COUNT(*) FROM contract_templates")
+            if count == 0:
+                now = int(datetime.utcnow().timestamp())
+                await conn.execute("""
+                    INSERT INTO contract_templates(template_text, created_at, updated_at)
+                    VALUES($1, $2, $3)
+                """, DEFAULT_CONTRACT, now, now)
+                logger.info("Default contract template inserted")
                 
         logger.info("PostgreSQL database initialized successfully")
     except Exception as e:
@@ -236,6 +252,24 @@ async def update_user_agreed(uid: int, ts: int):
 async def update_user_course(uid: int, course_name: str):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET course_name=$1 WHERE user_id=$2", course_name, uid)
+
+async def get_contract_template() -> str:
+    """Hozirgi shartnoma matnini olish."""
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT template_text FROM contract_templates ORDER BY id DESC LIMIT 1"
+        )
+        return row['template_text'] if row else DEFAULT_CONTRACT
+
+async def update_contract_template(new_text: str):
+    """Shartnoma matnini yangilash."""
+    now = int(datetime.utcnow().timestamp())
+    async with db_pool.acquire() as conn:
+        # Yangi shartnoma matni qo'shish (tarixi saqlanadi)
+        await conn.execute("""
+            INSERT INTO contract_templates(template_text, created_at, updated_at)
+            VALUES($1, $2, $3)
+        """, new_text, now, now)
 
 async def clear_user_group(uid: int, gid: int):
     async with db_pool.acquire() as conn:
