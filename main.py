@@ -9,7 +9,7 @@ from typing import Optional
 import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
-    Message, CallbackQuery,
+    Message, CallbackQuery, ChatMemberUpdated,
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, FSInputFile, BufferedInputFile,
     WebAppInfo
@@ -462,6 +462,47 @@ def build_contract_files(user_fullname: str, user_phone: Optional[str]):
     return txt_buf, pdf_buf
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Guruhga yangi a'zo qo'shilganda welcome message
+@dp.chat_member()
+async def on_chat_member_updated(event: ChatMemberUpdated):
+    """Guruhga yangi odam qo'shilganda xabar yuborish."""
+    try:
+        # Faqat guruhlar uchun
+        if event.chat.type not in ("group", "supergroup"):
+            return
+        
+        # Faqat yangi a'zolar uchun (member bo'lmagandan member bo'lganda)
+        if event.new_chat_member.status == "member" and event.old_chat_member.status not in ("member", "administrator", "creator"):
+            user = event.new_chat_member.user
+            
+            # Botni o'zini e'tiborsiz qoldirish
+            if user.id == bot.id:
+                return
+            
+            # Mention yaratish
+            user_mention = f"[{user.first_name}](tg://user?id={user.id})"
+            bot_username = (await bot.get_me()).username
+            
+            # Welcome message
+            welcome_text = (
+                f"👋 Salom {user_mention}!\n\n"
+                f"🎓 Guruhga xush kelibsiz!\n\n"
+                f"📝 Obuna rejimiga o'tish uchun ro'yxatdan o'ting:\n"
+                f"👉 Mening private chatimda /start bosing: @{bot_username}\n\n"
+                f"✅ Ism-familiya va telefon raqamingizni yuboring"
+            )
+            
+            await bot.send_message(
+                chat_id=event.chat.id,
+                text=welcome_text,
+                parse_mode="Markdown"
+            )
+            
+            logger.info(f"Welcome message sent to user {user.id} in group {event.chat.id}")
+            
+    except Exception as e:
+        logger.error(f"Error in on_chat_member_updated: {e}")
 
 def admin_reply_keyboard() -> ReplyKeyboardMarkup:
     """Admin uchun doim ko'rinadigan tugmalar."""
