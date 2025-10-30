@@ -196,7 +196,7 @@ async def db_init():
                 await conn.execute("""
                     INSERT INTO contract_templates(template_text, created_at, updated_at)
                     VALUES($1, $2, $3)
-                """, DEFAULT_CONTRACT, now, now)
+                """, CONTRACT_TEXT, now, now)
                 logger.info("Default contract template inserted")
                 
         logger.info("PostgreSQL database initialized successfully")
@@ -261,7 +261,7 @@ async def get_contract_template() -> str:
         row = await conn.fetchrow(
             "SELECT template_text FROM contract_templates ORDER BY id DESC LIMIT 1"
         )
-        return row['template_text'] if row else DEFAULT_CONTRACT
+        return row['template_text'] if row else CONTRACT_TEXT
 
 async def update_contract_template(new_text: str):
     """Shartnoma matnini yangilash."""
@@ -470,8 +470,12 @@ def human_left(expires_at: int) -> tuple[str, int]:
     days_left = (dt_loc.date() - (datetime.utcnow() + TZ_OFFSET).date()).days
     return dt_loc.strftime("%Y-%m-%d"), days_left
 
-def build_contract_files(user_fullname: str, user_phone: Optional[str]):
-    stamped = f"{CONTRACT_TEXT}\n\n---\nO'quvchi: {user_fullname}\nTelefon: {user_phone or '-'}\nSana: {(datetime.utcnow()+TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n"
+async def build_contract_files(user_fullname: str, user_phone: Optional[str]):
+    """Database'dan shartnoma matnini olib, PDF va TXT yaratish."""
+    # Database'dan shartnoma matnini olish
+    contract_text = await get_contract_template()
+    
+    stamped = f"{contract_text}\n\n---\nO'quvchi: {user_fullname}\nTelefon: {user_phone or '-'}\nSana: {(datetime.utcnow()+TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n"
     txt_buf = io.BytesIO(stamped.encode("utf-8"))
     txt_buf.name = "shartnoma.txt"
     pdf_buf = None
