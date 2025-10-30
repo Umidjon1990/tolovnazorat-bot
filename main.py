@@ -1150,7 +1150,7 @@ async def on_admin_date_handler(m: Message):
             await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
         return
     
-    # Sana kiritish (to'lov tasdiqlash uchun)
+    # Sana kiritish (to'lov tasdiqlash yoki registration uchun)
     if m.from_user.id in WAIT_DATE_FOR:
         try:
             raw = (m.text or "").strip().replace("/", "-")
@@ -1160,11 +1160,63 @@ async def on_admin_date_handler(m: Message):
                 start_dt = datetime.strptime(raw, "%Y-%m-%d")
             except Exception:
                 return await m.answer("❗ Sana tushunilmadi. Misol: 2025-10-01")
-            pid = WAIT_DATE_FOR.pop(m.from_user.id, None)
-            if not pid:
-                return await m.answer("Sessiya topilmadi. Iltimos, Approve (sana tanlash) tugmasidan qayta boshlang.")
-            iso = start_dt.isoformat()
-            await m.answer("✅ Sana qabul qilindi.\nEndi guruh(lar)ga qo'shish usulini tanlang:", reply_markup=multi_select_entry_kb(pid, with_date_iso=iso))
+            
+            id_value = WAIT_DATE_FOR.pop(m.from_user.id, None)
+            if not id_value:
+                return await m.answer("Sessiya topilmadi.")
+            
+            # Payment ID yoki User ID ekanligini tekshirish
+            payment_row = await get_payment(id_value)
+            
+            if payment_row:
+                # Bu to'lov tasdiqlash
+                iso = start_dt.isoformat()
+                await m.answer("✅ Sana qabul qilindi.\nEndi guruh(lar)ga qo'shish usulini tanlang:", reply_markup=multi_select_entry_kb(id_value, with_date_iso=iso))
+            else:
+                # Bu registration tasdiqlash
+                user_id = id_value
+                expires_at = int((start_dt + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+                
+                # User ma'lumotlarini olish
+                user_row = await get_user(user_id)
+                username, fullname = await fetch_user_profile(user_id)
+                phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+                
+                # Birinchi guruhga qo'shish
+                if GROUP_IDS:
+                    primary_gid = GROUP_IDS[0]
+                    await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
+                    
+                    human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+                    human_start = (start_dt + TZ_OFFSET).strftime("%Y-%m-%d")
+                    
+                    # User'ga xabar
+                    try:
+                        await bot.send_message(
+                            user_id,
+                            f"✅ *Tabriklaymiz! Ro'yxatdan o'tdingiz!*\n\n"
+                            f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun\n"
+                            f"⏳ Tugash sanasi: {human_exp}\n\n"
+                            f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to notify user {user_id}: {e}")
+                    
+                    # Admin'ga xabar
+                    await m.answer(
+                        f"✅ *TASDIQLANDI*\n\n"
+                        f"👤 {fullname}\n"
+                        f"📞 Telefon: {phone}\n"
+                        f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun\n"
+                        f"⏳ Tugash: {human_exp}",
+                        parse_mode="Markdown"
+                    )
+                    
+                    logger.info(f"Registration approved with custom date for user {user_id} by admin {m.from_user.id}")
+                else:
+                    await m.answer("❗ Guruhlar topilmadi")
+                    
         except Exception as e:
             logger.error(f"Error in on_admin_date_handler: {e}")
             await m.answer("Xatolik yuz berdi")
@@ -2084,6 +2136,123 @@ async def cb_warn_kick(c: CallbackQuery):
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_warn_kick: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+# Yangi ro'yxatdan o'tish tasdiqlash callback'lari
+@dp.callback_query(F.data.startswith("reg_approve_now:"))
+async def cb_reg_approve_now(c: CallbackQuery):
+    """Bugundan tasdiqlash - 30 kunlik obuna."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        user_id = int(c.data.split(":")[1])
+        
+        # 30 kunlik obuna bugundan
+        start_dt = datetime.utcnow()
+        expires_at = int((start_dt + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+        
+        # User ma'lumotlarini olish
+        user_row = await get_user(user_id)
+        username, fullname = await fetch_user_profile(user_id)
+        phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+        
+        # Birinchi guruhga qo'shish (primary)
+        if GROUP_IDS:
+            primary_gid = GROUP_IDS[0]
+            await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
+            
+            human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+            
+            # User'ga xabar
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"✅ *Tabriklaymiz! Ro'yxatdan o'tdingiz!*\n\n"
+                    f"📅 Obuna: {SUBSCRIPTION_DAYS} kun\n"
+                    f"⏳ Tugash sanasi: {human_exp}\n\n"
+                    f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to notify user {user_id}: {e}")
+            
+            # Admin'ga xabar
+            await c.message.edit_text(
+                f"✅ *TASDIQLANDI*\n\n"
+                f"👤 {fullname}\n"
+                f"📞 Telefon: {phone}\n"
+                f"📅 Obuna: bugundan {SUBSCRIPTION_DAYS} kun\n"
+                f"⏳ Tugash: {human_exp}",
+                parse_mode="Markdown"
+            )
+            await c.answer("✅ Tasdiqlandi!")
+            
+            logger.info(f"Registration approved for user {user_id} by admin {c.from_user.id}")
+        else:
+            await c.answer("❗ Guruhlar topilmadi", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"Error in cb_reg_approve_now: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("reg_approve_date:"))
+async def cb_reg_approve_date(c: CallbackQuery):
+    """Sana tanlash uchun."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        user_id = int(c.data.split(":")[1])
+        
+        # Admin'dan sanani so'rash
+        WAIT_DATE_FOR[c.from_user.id] = user_id  # User ID ni payment ID o'rniga ishlatamiz
+        
+        await c.message.edit_text(
+            "📅 *Obuna boshlanish sanasini kiriting:*\n\n"
+            "Format: YYYY-MM-DD\n"
+            "Misol: 2025-10-20",
+            parse_mode="Markdown"
+        )
+        await c.answer("📅 Sana kiriting")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_reg_approve_date: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("reg_reject:"))
+async def cb_reg_reject(c: CallbackQuery):
+    """Ro'yxatdan o'tishni rad etish."""
+    if not is_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        user_id = int(c.data.split(":")[1])
+        
+        # User'ga xabar
+        try:
+            await bot.send_message(
+                user_id,
+                "❌ Kechirasiz, ro'yxatdan o'tish so'rovingiz rad etildi.\n\n"
+                "Qo'shimcha ma'lumot olish uchun admin bilan bog'laning."
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify user {user_id}: {e}")
+        
+        # Admin'ga xabar
+        username, fullname = await fetch_user_profile(user_id)
+        await c.message.edit_text(
+            f"❌ *RAD ETILDI*\n\n"
+            f"👤 {fullname}\n"
+            f"🆔 User ID: {user_id}",
+            parse_mode="Markdown"
+        )
+        await c.answer("❌ Rad etildi")
+        
+        logger.info(f"Registration rejected for user {user_id} by admin {c.from_user.id}")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_reg_reject: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
 async def main():
