@@ -647,6 +647,16 @@ async def get_allowed_groups(uid: int) -> list[int]:
         
         return []
 
+async def check_group_access(admin_id: int, group_id: int) -> bool:
+    """Adminning guruhga ruxsati borligini tekshirish.
+    
+    Returns:
+        True - agar admin guruhga ruxsat etilgan bo'lsa
+        False - agar admin guruhga ruxsat etilmagan bo'lsa
+    """
+    allowed_groups = await get_allowed_groups(admin_id)
+    return group_id in allowed_groups
+
 async def is_member_of_any_group(uid: int) -> bool:
     """Foydalanuvchi kamida bitta guruhda ekanligini tekshirish."""
     for group_id in GROUP_IDS:
@@ -2077,18 +2087,20 @@ async def cmd_gstats(m: Message):
 @dp.message(F.text == "📊 Statistika")
 async def admin_stats_button(m: Message):
     """Admin Statistika tugmasi handleri."""
-    if not is_admin(m.from_user.id):
+    if not await is_active_admin(m.from_user.id):
         return
     
-    if not GROUP_IDS:
-        await m.answer("⚙️ PRIVATE_GROUP_ID bo'sh. Secrets'ga guruh ID'larini kiriting.")
+    # Ruxsat etilgan guruhlarni olish
+    allowed_groups = await get_allowed_groups(m.from_user.id)
+    if not allowed_groups:
+        await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
         return
     
     now = int(datetime.utcnow().timestamp())
     
-    # Barcha guruhlardagi unique userlarni yig'amiz
+    # Faqat ruxsat etilgan guruhlardagi unique userlarni yig'amiz
     all_users = {}
-    for gid in GROUP_IDS:
+    for gid in allowed_groups:
         members = await all_members_of_group(gid)
         for uid, username, full_name, exp, phone in members:
             if uid not in all_users or (all_users[uid] or 0) < (exp or 0):
@@ -2104,12 +2116,12 @@ async def admin_stats_button(m: Message):
         f"— Jami: {total}\n"
         f"— Aktiv: {active}\n"
         f"— Muddati tugagan: {expired}\n\n"
-        "📚 Guruhlar kesimi:"
+        f"📚 Guruhlar kesimi ({len(allowed_groups)} ta):"
     )
     await m.answer(header)
     
-    titles = dict(await resolve_group_titles())
-    for gid in GROUP_IDS:
+    titles = dict(await resolve_group_titles(allowed_groups))
+    for gid in allowed_groups:
         users = await all_members_of_group(gid)
         # Faqat aktiv obunali foydalanuvchilarni qoldirish
         active_users = [(uid, username, full_name, exp, phone) 
@@ -2146,13 +2158,19 @@ async def admin_stats_button(m: Message):
 @dp.message(F.text == "👥 Guruh o'quvchilari")
 async def admin_group_users_button(m: Message):
     """Admin Guruh o'quvchilari tugmasi handleri."""
-    if not is_admin(m.from_user.id):
+    if not await is_active_admin(m.from_user.id):
         return
     
-    # Guruhlar ro'yxatini ko'rsatish
-    titles = dict(await resolve_group_titles())
+    # Ruxsat etilgan guruhlarni olish
+    allowed_groups = await get_allowed_groups(m.from_user.id)
+    if not allowed_groups:
+        await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
+        return
+    
+    # Faqat ruxsat etilgan guruhlar ro'yxatini ko'rsatish
+    titles = dict(await resolve_group_titles(allowed_groups))
     buttons = []
-    for gid in GROUP_IDS:
+    for gid in allowed_groups:
         title = titles.get(gid, str(gid))
         buttons.append([InlineKeyboardButton(text=f"📚 {title}", callback_data=f"gusers_{gid}")])
     
@@ -2273,8 +2291,14 @@ async def cb_group_users(c: CallbackQuery):
     try:
         group_id = int(c.data.split("_")[1])
         
+        # Guruh ruxsatini tekshirish
+        if not await check_group_access(c.from_user.id, group_id):
+            await c.message.answer("❌ Sizga bu guruhga ruxsat yo'q!")
+            return
+        
         # Guruh nomini olish
-        titles = dict(await resolve_group_titles())
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        titles = dict(await resolve_group_titles(allowed_groups))
         group_name = titles.get(group_id, str(group_id))
         
         # Guruhdagi barcha o'quvchilarni olish
