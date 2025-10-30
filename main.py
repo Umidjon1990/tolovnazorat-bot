@@ -1077,11 +1077,11 @@ async def cmd_groups(m: Message):
 
 @dp.message(Command("add_group"))
 async def cmd_add_group(m: Message):
-    """Yangi guruh qo'shish."""
+    """Yangi guruh qo'shish (faqat super admin)."""
     global GROUP_IDS
     
-    if not is_admin(m.from_user.id):
-        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
     try:
         parts = (m.text or "").split(maxsplit=2)
@@ -1131,11 +1131,11 @@ async def cmd_add_group(m: Message):
 
 @dp.message(Command("remove_group"))
 async def cmd_remove_group(m: Message):
-    """Guruhni o'chirish."""
+    """Guruhni o'chirish (faqat super admin)."""
     global GROUP_IDS
     
-    if not is_admin(m.from_user.id):
-        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    if not is_super_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat super adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
     try:
         parts = (m.text or "").split()
