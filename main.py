@@ -548,7 +548,7 @@ def admin_reply_keyboard() -> ReplyKeyboardMarkup:
     """Admin uchun doim ko'rinadigan tugmalar."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📊 Statistika")],
+            [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
             [KeyboardButton(text="✅ Tasdiqlangan to'lovlar"), KeyboardButton(text="⏳ Kutilayotgan to'lovlar")],
             [KeyboardButton(text="🧹 Tozalash")]
         ],
@@ -1451,6 +1451,38 @@ async def admin_stats_button(m: Message):
         
         await m.answer("\n".join(lines))
 
+@dp.message(F.text == "👥 Guruh o'quvchilari")
+async def admin_group_users_button(m: Message):
+    """Admin Guruh o'quvchilari tugmasi handleri."""
+    if not is_admin(m.from_user.id):
+        return
+    
+    # Guruhlar ro'yxatini ko'rsatish
+    titles = dict(await resolve_group_titles())
+    buttons = []
+    for gid in GROUP_IDS:
+        title = titles.get(gid, str(gid))
+        buttons.append([InlineKeyboardButton(text=f"📚 {title}", callback_data=f"gusers_{gid}")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await m.answer("👥 *Guruh tanlang*\n\nQaysi guruhdagi o'quvchilarni ko'rmoqchisiz?", reply_markup=kb, parse_mode="HTML")
+
+@dp.message(Command("group_users"))
+async def cmd_group_users(m: Message):
+    """Guruh o'quvchilarini ko'rish."""
+    if not is_admin(m.from_user.id):
+        return
+    
+    # Guruhlar ro'yxatini ko'rsatish
+    titles = dict(await resolve_group_titles())
+    buttons = []
+    for gid in GROUP_IDS:
+        title = titles.get(gid, str(gid))
+        buttons.append([InlineKeyboardButton(text=f"📚 {title}", callback_data=f"gusers_{gid}")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await m.answer("👥 <b>Guruh tanlang</b>\n\nQaysi guruhdagi o'quvchilarni ko'rmoqchisiz?", reply_markup=kb, parse_mode="HTML")
+
 @dp.message(F.text == "✅ Tasdiqlangan to'lovlar")
 async def admin_approved_button(m: Message):
     """Admin Tasdiqlangan to'lovlar tugmasi handleri."""
@@ -1540,6 +1572,87 @@ async def cb_approved_last3(c: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in cb_approved_last3: {e}")
         await c.message.answer("Xatolik yuz berdi")
+
+@dp.callback_query(F.data.startswith("gusers_"))
+async def cb_group_users(c: CallbackQuery):
+    """Tanlangan guruhdagi barcha o'quvchilarni ko'rsatish."""
+    await c.answer()
+    
+    try:
+        group_id = int(c.data.split("_")[1])
+        
+        # Guruh nomini olish
+        titles = dict(await resolve_group_titles())
+        group_name = titles.get(group_id, str(group_id))
+        
+        # Guruhdagi barcha o'quvchilarni olish
+        users = await all_members_of_group(group_id)
+        
+        if not users:
+            await c.message.edit_text(f"👥 <b>{group_name}</b>\n\n❌ Bu guruhda o'quvchilar yo'q.", parse_mode="HTML")
+            return
+        
+        # Telegram API orqali guruhda turganlarni tekshirish
+        real_members = []
+        for uid, username, full_name, exp, phone in users:
+            try:
+                member = await bot.get_chat_member(group_id, uid)
+                if member.status in ["member", "administrator", "creator"]:
+                    real_members.append((uid, username, full_name, exp, phone))
+            except Exception:
+                pass
+        
+        if not real_members:
+            await c.message.edit_text(f"👥 <b>{group_name}</b>\n\n❌ Bu guruhda hozirda o'quvchilar yo'q.", parse_mode="HTML")
+            return
+        
+        # O'quvchilarni saralash - obuna sanasi bo'yicha
+        users_sorted = sorted(real_members, key=lambda r: (r[3] or 0), reverse=True)
+        
+        # Xabarni shakllantirish
+        await c.message.delete()
+        
+        header = f"👥 <b>{group_name}</b>\n📊 Jami: {len(users_sorted)} ta o'quvchi\n\n"
+        await c.message.answer(header, parse_mode="HTML")
+        
+        # O'quvchilarni 20 tadan xabar yuborish
+        MAX_PER_MSG = 20
+        for i in range(0, len(users_sorted), MAX_PER_MSG):
+            batch = users_sorted[i:i+MAX_PER_MSG]
+            lines = []
+            
+            for j, (uid, username, full_name, exp, phone) in enumerate(batch, start=i+1):
+                # Profil linki
+                chat_link = f"<a href='tg://user?id={uid}'>{full_name or 'Nomsiz'}</a>"
+                
+                # Obuna sanasi
+                if exp:
+                    exp_date = (datetime.utcfromtimestamp(exp) + TZ_OFFSET).strftime("%Y-%m-%d")
+                    now = int(datetime.utcnow().timestamp())
+                    if exp > now:
+                        days_left = (datetime.utcfromtimestamp(exp) + TZ_OFFSET).date() - (datetime.utcnow() + TZ_OFFSET).date()
+                        status = f"✅ {exp_date} ({days_left.days} kun)"
+                    else:
+                        status = f"❌ {exp_date} (tugagan)"
+                else:
+                    status = "—"
+                
+                # Telefon
+                phone_str = phone if phone else "—"
+                
+                lines.append(
+                    f"{j}. {chat_link}\n"
+                    f"   🆔 ID: <code>{uid}</code>\n"
+                    f"   📞 Telefon: {phone_str}\n"
+                    f"   ⏳ Obuna: {status}\n"
+                )
+            
+            await c.message.answer("\n".join(lines), parse_mode="HTML")
+            await asyncio.sleep(0.3)  # Telegram limitidan qochish
+        
+    except Exception as e:
+        logger.error(f"Error in cb_group_users: {e}")
+        await c.message.answer(f"Xatolik yuz berdi: {e}")
 
 @dp.callback_query(F.data == "approved_all")
 async def cb_approved_all(c: CallbackQuery):
