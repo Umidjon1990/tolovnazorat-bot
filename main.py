@@ -112,6 +112,7 @@ WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
 WAIT_CONTRACT_CONFIRM: set[int] = set()
 WAIT_CONTRACT_EDIT: set[int] = set()
+WAIT_PAYMENT_PHOTO: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 # Admin xabarlarini kuzatish (payment_id -> [message_ids])
 ADMIN_MESSAGES: dict[int, list[int]] = {}
@@ -837,6 +838,7 @@ def admin_reply_keyboard(uid: int) -> ReplyKeyboardMarkup:
     """Admin uchun doim ko'rinadigan tugmalar."""
     keyboard = [
         [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
+        [KeyboardButton(text="💳 To'lovlar")],
     ]
     
     # Super admin uchun qo'shimcha tugmalar
@@ -2755,6 +2757,229 @@ async def admin_pending_button(m: Message):
         logger.error(f"Error in admin_pending_button: {e}")
         await m.answer(f"Xatolik yuz berdi: {str(e)}")
 
+@dp.message(F.text == "💳 To'lovlar")
+async def admin_payments_button(m: Message):
+    """Admin To'lovlar tugmasi handleri."""
+    if not await is_active_admin(m.from_user.id):
+        return
+    
+    try:
+        # Admin'ning ruxsat etilgan guruhlarini olish
+        allowed_groups = await get_allowed_groups(m.from_user.id)
+        
+        # Pending va approved to'lovlar sonini olish (faqat ruxsat etilgan guruhlarga tegishli)
+        async with db_pool.acquire() as conn:
+            if is_super_admin(m.from_user.id):
+                # Super admin barcha to'lovlarni ko'radi
+                pending_count = await conn.fetchval("SELECT COUNT(*) FROM payments WHERE status = 'pending'")
+                approved_count = await conn.fetchval("SELECT COUNT(*) FROM payments WHERE status = 'approved'")
+            else:
+                # Regular admin faqat o'z guruhlariga tegishli to'lovlarni ko'radi
+                if not allowed_groups:
+                    await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
+                    return
+                
+                # User_groups jadvalidan user'lar ro'yxatini olish
+                user_ids_in_groups = await conn.fetch(
+                    "SELECT DISTINCT user_id FROM user_groups WHERE group_id = ANY($1)", 
+                    allowed_groups
+                )
+                user_ids = [row['user_id'] for row in user_ids_in_groups]
+                
+                if not user_ids:
+                    pending_count = 0
+                    approved_count = 0
+                else:
+                    pending_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM payments WHERE status = 'pending' AND user_id = ANY($1)", 
+                        user_ids
+                    )
+                    approved_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM payments WHERE status = 'approved' AND user_id = ANY($1)", 
+                        user_ids
+                    )
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"⏳ Kutilayotganlar ({pending_count})", callback_data="payments_pending")],
+            [InlineKeyboardButton(text=f"✅ Tasdiqlangan ({approved_count})", callback_data="payments_approved")]
+        ])
+        
+        await m.answer(
+            "💳 <b>To'lovlar</b>\n\n"
+            "Qaysi birini ko'rmoqchisiz?",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error in admin_payments_button: {e}")
+        await m.answer("Xatolik yuz berdi")
+
+@dp.callback_query(F.data == "payments_pending")
+async def cb_payments_pending(c: CallbackQuery):
+    """Kutilayotgan to'lovlarni ko'rsatish."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    await c.answer()
+    
+    try:
+        # Admin'ning ruxsat etilgan guruhlarini olish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        
+        if is_super_admin(c.from_user.id):
+            # Super admin barcha to'lovlarni ko'radi
+            pending_payments = await db_pool.fetch(
+                "SELECT id, user_id, photo_file, created_at FROM payments WHERE status = 'pending' ORDER BY id ASC"
+            )
+        else:
+            # Regular admin faqat o'z guruhlariga tegishli to'lovlarni ko'radi
+            if not allowed_groups:
+                await c.message.edit_text("❌ Sizga hech qanday guruh tayinlanmagan!")
+                return
+            
+            # User_groups jadvalidan user'lar ro'yxatini olish
+            user_ids_in_groups = await db_pool.fetch(
+                "SELECT DISTINCT user_id FROM user_groups WHERE group_id = ANY($1)", 
+                allowed_groups
+            )
+            user_ids = [row['user_id'] for row in user_ids_in_groups]
+            
+            if not user_ids:
+                await c.message.edit_text("⏳ Hozircha kutilayotgan to'lovlar yo'q.")
+                return
+            
+            pending_payments = await db_pool.fetch(
+                "SELECT id, user_id, photo_file, created_at FROM payments WHERE status = 'pending' AND user_id = ANY($1) ORDER BY id ASC",
+                user_ids
+            )
+        
+        if not pending_payments:
+            await c.message.edit_text("⏳ Hozircha kutilayotgan to'lovlar yo'q.")
+            return
+        
+        await c.message.delete()
+        
+        for payment in pending_payments:
+            pid = payment['id']
+            uid = payment['user_id']
+            photo_file_id = payment['photo_file']
+            created_at = payment['created_at']
+            
+            user_row = await get_user(uid)
+            if not user_row:
+                continue
+            
+            # Telegram'dan profil nomini olish (har doim yangi)
+            username, full_name = await fetch_user_profile(uid)
+            phone = user_row[5] if len(user_row) > 5 else "yo'q"
+            payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
+            
+            # Username bor bo'lsa username ko'rsatamiz, yo'qsa "Chat ochish" - ikkalasi ham link
+            chat_link = f"📧 [{username}](tg://user?id={uid})" if username else f"📧 [Chat ochish](tg://user?id={uid})"
+            
+            kb = approve_keyboard(pid)
+            caption = (
+                f"⏳ *Kutilayotgan to'lov*\n\n"
+                f"👤 {full_name}\n"
+                f"{chat_link}\n"
+                f"📞 Telefon: {phone}\n"
+                f"🆔 User ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`\n"
+                f"📅 Vaqt: {payment_date}"
+            )
+            
+            await bot.send_photo(c.from_user.id, photo_file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error in cb_payments_pending: {e}")
+        await bot.send_message(c.from_user.id, f"Xatolik yuz berdi: {str(e)}")
+
+@dp.callback_query(F.data == "payments_approved")
+async def cb_payments_approved(c: CallbackQuery):
+    """Tasdiqlangan to'lovlarni ko'rsatish."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    await c.answer()
+    
+    try:
+        # Admin'ning ruxsat etilgan guruhlarini olish
+        allowed_groups = await get_allowed_groups(c.from_user.id)
+        
+        if is_super_admin(c.from_user.id):
+            # Super admin barcha to'lovlarni ko'radi
+            approved_payments = await db_pool.fetch(
+                "SELECT id, user_id, photo_file, created_at FROM payments WHERE status = 'approved' ORDER BY id DESC LIMIT 10"
+            )
+        else:
+            # Regular admin faqat o'z guruhlariga tegishli to'lovlarni ko'radi
+            if not allowed_groups:
+                await c.message.edit_text("❌ Sizga hech qanday guruh tayinlanmagan!")
+                return
+            
+            # User_groups jadvalidan user'lar ro'yxatini olish
+            user_ids_in_groups = await db_pool.fetch(
+                "SELECT DISTINCT user_id FROM user_groups WHERE group_id = ANY($1)", 
+                allowed_groups
+            )
+            user_ids = [row['user_id'] for row in user_ids_in_groups]
+            
+            if not user_ids:
+                await c.message.edit_text("✅ Hozircha tasdiqlangan to'lovlar yo'q.")
+                return
+            
+            approved_payments = await db_pool.fetch(
+                "SELECT id, user_id, photo_file, created_at FROM payments WHERE status = 'approved' AND user_id = ANY($1) ORDER BY id DESC LIMIT 10",
+                user_ids
+            )
+        
+        if not approved_payments:
+            await c.message.edit_text("✅ Hozircha tasdiqlangan to'lovlar yo'q.")
+            return
+        
+        await c.message.delete()
+        
+        titles = dict(await resolve_group_titles())
+        
+        for payment in approved_payments:
+            pid = payment['id']
+            uid = payment['user_id']
+            photo_file_id = payment['photo_file']
+            created_at = payment['created_at']
+            
+            user_row = await get_user(uid)
+            if not user_row:
+                continue
+            
+            # Telegram'dan profil nomini olish (har doim yangi)
+            username, full_name = await fetch_user_profile(uid)
+            phone = user_row[5] if len(user_row) > 5 else "yo'q"
+            payment_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M") if created_at else "yo'q"
+            
+            # Guruhlarni olish
+            groups_data = await db_pool.fetch(
+                "SELECT group_id FROM user_groups WHERE user_id = $1", uid
+            )
+            group_names = [titles.get(row['group_id'], str(row['group_id'])) for row in groups_data]
+            groups_str = ", ".join(group_names) if group_names else "yo'q"
+            
+            # Username bor bo'lsa username ko'rsatamiz, yo'qsa "Chat ochish" - ikkalasi ham link
+            chat_link = f"📧 [{username}](tg://user?id={uid})" if username else f"📧 [Chat ochish](tg://user?id={uid})"
+            caption = (
+                f"✅ *Tasdiqlangan to'lov*\n\n"
+                f"👤 {full_name}\n"
+                f"{chat_link}\n"
+                f"📞 Telefon: {phone}\n"
+                f"🏫 Guruhlar: {groups_str}\n"
+                f"🆔 User ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`\n"
+                f"📅 Vaqt: {payment_date}"
+            )
+            
+            await bot.send_photo(c.from_user.id, photo_file_id, caption=caption, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error in cb_payments_approved: {e}")
+        await bot.send_message(c.from_user.id, f"Xatolik yuz berdi: {str(e)}")
+
 @dp.message(F.text == "🧹 Tozalash")
 async def admin_cleanup_button(m: Message):
     """Admin chatni to'liq tozalash tugmasi."""
@@ -3127,47 +3352,30 @@ async def on_contact(m: Message):
         phone = contact.phone_number
         await update_user_phone(m.from_user.id, phone)
         WAIT_CONTACT_FOR.discard(m.from_user.id)
+        WAIT_PAYMENT_PHOTO.add(m.from_user.id)
         
-        # User ma'lumotlarini database'dan olish
-        user_row = await get_user(m.from_user.id)
-        fullname = user_row[3] if user_row and len(user_row) > 3 else f"User{m.from_user.id}"
-        username, _ = await fetch_user_profile(m.from_user.id)
+        # To'lov ma'lumotini olish
+        payment_info = os.getenv("PAYMENT_INFO", "")
         
-        # User'ga tasdiqlash kutilayotgani haqida xabar
+        if not payment_info:
+            # Agar PAYMENT_INFO yo'q bo'lsa, default xabar
+            payment_info = (
+                "💳 <b>To'lov ma'lumoti:</b>\n\n"
+                "🏦 Bank: Xalq Banki\n"
+                "💰 Summa: 100,000 so'm\n"
+                "📋 Karta raqam: 8600 **** **** ****\n\n"
+                "📸 <b>To'lov chekini yuboring!</b>"
+            )
+        
+        # User'ga to'lov ma'lumoti va chek yuborish ko'rsatmasi
         await m.answer(
-            "✅ *Ro'yxatdan o'tish so'rovi yuborildi!*\n\n"
-            "⏳ Admin tasdiqlashini kuting.\n"
-            "Tez orada xabar beramiz!",
-            parse_mode="Markdown"
+            f"✅ <b>Telefon raqam qabul qilindi!</b>\n\n"
+            f"{payment_info}\n\n"
+            f"⏳ To'lovni amalga oshirgandan so'ng, <b>chek rasmini</b> yuboring.",
+            parse_mode="HTML"
         )
         
-        # Admin'ga tasdiqlash so'rovi yuborish
-        chat_link = f"📧 [{username}](tg://user?id={m.from_user.id})" if username else f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
-        
-        for admin_id in ADMIN_IDS:
-            try:
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Bugundan tasdiqlash", callback_data=f"reg_approve_now:{m.from_user.id}")],
-                    [InlineKeyboardButton(text="📅 Sana tanlash", callback_data=f"reg_approve_date:{m.from_user.id}")],
-                    [InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reg_reject:{m.from_user.id}")]
-                ])
-                
-                await bot.send_message(
-                    admin_id,
-                    f"📝 *YANGI RO'YXATDAN O'TISH SO'ROVI*\n\n"
-                    f"👤 {fullname}\n"
-                    f"{chat_link}\n"
-                    f"📞 Telefon: {phone}\n"
-                    f"🆔 User ID: `{m.from_user.id}`\n\n"
-                    f"Admin, tasdiqlaysizmi?",
-                    reply_markup=kb,
-                    parse_mode="Markdown"
-                )
-                
-                logger.info(f"Registration request sent to admin {admin_id} for user {m.from_user.id}")
-                
-            except Exception as e:
-                logger.error(f"Failed to send registration request to admin {admin_id}: {e}")
+        logger.info(f"User {m.from_user.id} completed phone registration, waiting for payment photo")
         
     except Exception as e:
         logger.error(f"Error in on_contact: {e}")
@@ -3230,18 +3438,26 @@ async def cb_pay_link(c: CallbackQuery):
 
 @dp.message(F.photo)
 async def on_photo(m: Message):
+    # To'lov cheki kutilayotganlarni tekshirish
+    if m.from_user.id not in WAIT_PAYMENT_PHOTO:
+        return
+    
     try:
+        WAIT_PAYMENT_PHOTO.discard(m.from_user.id)
+        
+        # To'lovni database'ga qo'shish
         pid = await add_payment(m, m.photo[-1].file_id)
-        await m.answer("✅ Chekingiz qabul qilindi. Admin tekshiradi.")
+        await m.answer(
+            "✅ <b>To'lov cheki qabul qilindi!</b>\n\n"
+            "⏳ Admin tekshiradi va tasdiqlashini kuting.\n"
+            "Tez orada xabar beramiz!",
+            parse_mode="HTML"
+        )
         
         # User ma'lumotlarini olish
         user_row = await get_user(m.from_user.id)
         phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-        
-        # Kurs nomini olish
-        async with db_pool.acquire() as conn:
-            course_row = await conn.fetchrow("SELECT course_name FROM users WHERE user_id = $1", m.from_user.id)
-        course_name = course_row['course_name'] if course_row and course_row.get('course_name') else "Kiritilmagan"
+        fullname = user_row[4] if user_row and len(user_row) > 4 else "Noma'lum"
         
         # Telegram'dan profil nomini olish (har doim yangi)
         username, full_name = await fetch_user_profile(m.from_user.id)
@@ -3251,10 +3467,9 @@ async def on_photo(m: Message):
         kb = approve_keyboard(pid)
         caption = (
             f"🧾 *Yangi to'lov cheki*\n\n"
-            f"👤 {full_name}\n"
+            f"👤 {fullname}\n"
             f"{chat_link}\n"
             f"📱 Telefon: {phone}\n"
-            f"📚 Kurs: {course_name}\n"
             f"🆔 ID: `{m.from_user.id}`\n"
             f"💳 Payment ID: `{pid}`\n"
             f"📅 Vaqt: {(datetime.utcnow() + TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}"
@@ -3264,12 +3479,16 @@ async def on_photo(m: Message):
         if pid not in ADMIN_MESSAGES:
             ADMIN_MESSAGES[pid] = []
         
+        # Barcha adminlarga xabar yuborish
         for aid in ADMIN_IDS:
             try:
                 msg = await bot.send_photo(aid, m.photo[-1].file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
                 ADMIN_MESSAGES[pid].append(msg.message_id)
             except Exception as e:
                 logger.warning(f"Failed to send payment notification to admin {aid}: {e}")
+        
+        logger.info(f"User {m.from_user.id} uploaded payment photo, payment ID: {pid}")
+        
     except Exception as e:
         logger.error(f"Error in on_photo: {e}")
         await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
