@@ -2,9 +2,15 @@
 
 This project is a **Multi-Tenant Telegram Bot System** for managing online course subscriptions with Super Admin and Admin role-based access control.
 
-The primary active workflow facilitates **Group-Based Direct Registration**: users who join a group can register by providing their name and phone number, with admin approval leading to a 30-day auto-subscription without requiring payment receipts or invite links.
+The primary active workflow is **Payment-First Registration**: users register directly with the bot (no group membership required), submit payment receipts, receive admin approval, get 24-hour one-time invite links, and their 30-day subscription starts when they join the group. This workflow ensures payment verification before group access.
 
-The system also retains a **Legacy Mini App Payment Workflow** (currently inactive) that uses a React Mini App and FastAPI for payment-based subscriptions, where users upload payment receipts for admin approval to generate invite links. This legacy code is preserved for future multi-tenant expansion.
+**Key Features:**
+- **Payment-First Flow**: Register → Pay → Upload Receipt → Admin Approval → 24h Invite Link → Join Group → 30-Day Subscription Starts
+- **Multi-Admin Security**: Admins only see payments for their assigned groups (super admins see all)
+- **Auto-Subscription**: Subscription automatically starts when user joins group via invite link
+- **3-Day Reminder**: Users and admins receive notifications 3 days before subscription expires
+
+The system also retains a **Legacy Mini App Payment Workflow** (currently inactive) that uses a React Mini App and FastAPI for payment-based subscriptions. This legacy code is preserved for future expansion.
 
 The system leverages PostgreSQL for data persistence and aiogram 3.x for the bot framework, including robust automated subscription management with warnings and auto-kick features.
 
@@ -95,12 +101,19 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Smart Chat Links**: User messages use `[username](tg://user?id=...)` for clickable profiles.
 
 ## Technical Implementations
-- **Group-Based Direct Registration**: New `ChatMemberUpdated` handler for detecting new group members, triggering registration flow. Uses `allowed_updates` for member detection.
-- **State Management**: `WAIT_FULLNAME_FOR`, `WAIT_CONTACT_FOR`, `WAIT_DATE_FOR` sets to manage user input steps.
-- **Admin Approval**: Three callbacks (`reg_approve_now`, `reg_approve_date`, `reg_reject`) for managing direct registration requests.
-- **Unlimited Invite Links (for Legacy Workflow)**: Invite links are one-time use (`member_limit=1`) but do not expire by time, allowing flexible student onboarding.
-- **Profile Name & Chat Link Fix**: Uses `fetch_user_profile()` from Telegram API for fresh user names in all payment-related messages, ensuring consistency.
-- **Telegram Mini App (Legacy Workflow)**: React frontend (Vite) and FastAPI backend for user registration, course selection, payment submission, and admin operations. Features Telegram `initData` verification for authentication.
+- **Payment-First Registration Flow**:
+  - Users register via `/start` without group membership requirement
+  - Phone number collection triggers `PAYMENT_INFO` display (bank card details from environment)
+  - Photo handler captures receipt and stores in `payments` table with `status='pending'`
+  - Admin receives notification with payment details and approval buttons
+- **24-Hour Invite Links**: `send_one_time_link()` generates time-limited links with `member_limit=1` and `expire_date=24h`
+- **Auto-Subscription on Join**: `ChatMemberUpdated` handler detects group join and starts 30-day subscription automatically
+- **Group-Level Security**: Admin payment views filtered by assigned groups - regular admins only see their groups, super admins see all
+- **3-Day Expiry Reminders**: `REMIND_DAYS=3` triggers automated warnings to users and admins before subscription expires
+- **State Management**: `WAIT_FULLNAME_FOR`, `WAIT_CONTACT_FOR`, `WAIT_PAYMENT_PHOTO`, `WAIT_DATE_FOR` sets to manage multi-step workflows
+- **Admin Approval**: Callbacks (`ap_now`, `ap_date`, `reject`) with group selection and invite link generation
+- **Profile Name & Chat Link Fix**: Uses `fetch_user_profile()` from Telegram API for fresh user names in all payment-related messages, ensuring consistency
+- **Telegram Mini App (Legacy Workflow)**: React frontend (Vite) and FastAPI backend for user registration, course selection, payment submission, and admin operations. Features Telegram `initData` verification for authentication
 
 # External Dependencies
 
