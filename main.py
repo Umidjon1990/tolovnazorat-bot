@@ -591,10 +591,21 @@ async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tu
     return result
 
 async def send_one_time_link(group_id: int, user_id: int) -> str:
+    """24 soatlik bir martalik invite link yaratish.
+    
+    Args:
+        group_id: Guruh ID
+        user_id: User ID (link nomi uchun)
+    
+    Returns:
+        24 soat amal qiladigan bir martalik invite link
+    """
+    expire_date = datetime.utcnow() + timedelta(hours=24)
     link = await bot.create_chat_invite_link(
         chat_id=group_id,
         name=f"sub-{user_id}",
         member_limit=1,  # Faqat 1 kishi kirishi mumkin (bir martalik)
+        expire_date=expire_date,  # 24 soatdan keyin amal qilmaydi
         creates_join_request=False  # Avtomatik kirish, approval yo'q
     )
     return link.invite_link
@@ -793,10 +804,10 @@ async def build_contract_files(user_fullname: str, user_phone: Optional[str]):
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-# Guruhga yangi a'zo qo'shilganda welcome message
+# Guruhga yangi a'zo qo'shilganda subscription boshlanadi
 @dp.chat_member()
 async def on_chat_member_updated(event: ChatMemberUpdated):
-    """Guruhga yangi odam qo'shilganda xabar yuborish."""
+    """Guruhga yangi odam qo'shilganda 30 kunlik subscription boshlanadi (payment-first workflow)."""
     try:
         # Faqat guruhlar uchun
         if event.chat.type not in ("group", "supergroup"):
@@ -810,26 +821,75 @@ async def on_chat_member_updated(event: ChatMemberUpdated):
             if user.id == bot.id:
                 return
             
-            # Mention yaratish
-            user_mention = f"[{user.first_name}](tg://user?id={user.id})"
-            bot_username = (await bot.get_me()).username
+            # Database'da user'ni tekshirish - payment approved bo'lganmi?
+            user_row = await get_user(user.id)
             
-            # Welcome message
-            welcome_text = (
-                f"👋 Salom {user_mention}!\n\n"
-                f"🎓 Guruhga xush kelibsiz!\n\n"
-                f"📝 Obuna rejimiga o'tish uchun ro'yxatdan o'ting:\n"
-                f"👉 Mening private chatimda start bosing: @{bot_username}\n\n"
-                f"✅ Ism-familiya va telefon raqamingizni yuboring"
-            )
+            # Payment'ni tekshirish
+            payment_row = None
+            if user_row:
+                try:
+                    async with db_pool.acquire() as conn:
+                        payment_row = await conn.fetchrow(
+                            "SELECT id, status FROM payments WHERE user_id = $1 ORDER BY id DESC LIMIT 1",
+                            user.id
+                        )
+                except Exception:
+                    pass
             
-            await bot.send_message(
-                chat_id=event.chat.id,
-                text=welcome_text,
-                parse_mode="Markdown"
-            )
-            
-            logger.info(f"Welcome message sent to user {user.id} in group {event.chat.id}")
+            # Agar payment approved bo'lsa - 30 kunlik subscription boshlanadi
+            if payment_row and payment_row['status'] == 'approved':
+                now = int(datetime.utcnow().timestamp())
+                expires_at = now + SUBSCRIPTION_DAYS * 86400
+                
+                # Subscription boshlanadi
+                username = user.username or ""
+                full_name = user.full_name or user.first_name or "Nomsiz"
+                phone = user_row[5] if user_row and len(user_row) > 5 else None
+                
+                await upsert_user(user.id, username, full_name, event.chat.id, expires_at, phone)
+                await add_user_group(user.id, event.chat.id, expires_at)
+                
+                # User'ga xabar yuborish
+                expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+                try:
+                    await bot.send_message(
+                        chat_id=user.id,
+                        text=(
+                            f"🎉 *Tabriklayman!*\n\n"
+                            f"✅ Siz guruhga qo'shildingiz va obuna boshlanadi!\n\n"
+                            f"📅 Obuna tugashi: {expiry_date}\n"
+                            f"⏰ Muddat: {SUBSCRIPTION_DAYS} kun\n\n"
+                            f"📚 Guruh: {event.chat.title or 'Guruh'}"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send subscription start message to user {user.id}: {e}")
+                
+                logger.info(f"Subscription started for user {user.id} in group {event.chat.id} - expires at {expiry_date}")
+            else:
+                # Agar payment yo'q yoki pending bo'lsa - welcome message yuborish
+                user_mention = f"[{user.first_name}](tg://user?id={user.id})"
+                bot_username = (await bot.get_me()).username
+                
+                welcome_text = (
+                    f"👋 Salom {user_mention}!\n\n"
+                    f"🎓 Guruhga xush kelibsiz!\n\n"
+                    f"📝 Obuna boshlanishi uchun:\n"
+                    f"1️⃣ Mening private chatimda start bosing: @{bot_username}\n"
+                    f"2️⃣ Ism-familiya va telefon raqamingizni yuboring\n"
+                    f"3️⃣ To'lov chekini yuklang\n"
+                    f"4️⃣ Admin tasdiqlashi kutiladi\n\n"
+                    f"✅ Admin tasdiqlagach, guruhga qo'shilasiz!"
+                )
+                
+                await bot.send_message(
+                    chat_id=event.chat.id,
+                    text=welcome_text,
+                    parse_mode="Markdown"
+                )
+                
+                logger.info(f"Welcome message sent to user {user.id} in group {event.chat.id}")
             
     except Exception as e:
         logger.error(f"Error in on_chat_member_updated: {e}")
