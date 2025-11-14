@@ -112,6 +112,7 @@ WAIT_CONTACT_FOR: set[int] = set()
 WAIT_FULLNAME_FOR: set[int] = set()
 WAIT_CONTRACT_CONFIRM: set[int] = set()
 WAIT_CONTRACT_EDIT: set[int] = set()
+WAIT_PAYMENT_EDIT: set[int] = set()
 WAIT_PAYMENT_PHOTO: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 # Admin xabarlarini kuzatish (payment_id -> [message_ids])
@@ -223,6 +224,15 @@ CREATE TABLE IF NOT EXISTS admins(
     max_groups INTEGER DEFAULT -1,
     tariff TEXT,
     last_warning_sent_at BIGINT
+);
+CREATE TABLE IF NOT EXISTS payment_settings(
+    id SERIAL PRIMARY KEY,
+    bank_name TEXT NOT NULL,
+    card_number TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    additional_info TEXT,
+    updated_at BIGINT NOT NULL,
+    updated_by BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_id);
 CREATE INDEX IF NOT EXISTS idx_users_expires ON users(expires_at);
@@ -394,6 +404,23 @@ async def update_contract_template(new_text: str):
             INSERT INTO contract_templates(template_text, created_at, updated_at)
             VALUES($1, $2, $3)
         """, new_text, now, now)
+
+async def get_payment_settings():
+    """To'lov ma'lumotlarini olish."""
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT bank_name, card_number, amount, additional_info FROM payment_settings ORDER BY id DESC LIMIT 1"
+        )
+        return row if row else None
+
+async def update_payment_settings(bank_name: str, card_number: str, amount: str, additional_info: str, admin_id: int):
+    """To'lov ma'lumotlarini yangilash."""
+    now = int(datetime.utcnow().timestamp())
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO payment_settings(bank_name, card_number, amount, additional_info, updated_at, updated_by)
+            VALUES($1, $2, $3, $4, $5, $6)
+        """, bank_name, card_number, amount, additional_info, now, admin_id)
 
 async def load_groups_from_db() -> list[int]:
     """Database'dan guruhlar ro'yxatini yuklash."""
@@ -898,7 +925,7 @@ def admin_reply_keyboard(uid: int) -> ReplyKeyboardMarkup:
     """Admin uchun doim ko'rinadigan tugmalar."""
     keyboard = [
         [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
-        [KeyboardButton(text="💳 To'lovlar")],
+        [KeyboardButton(text="💳 To'lovlar"), KeyboardButton(text="💳 To'lov ma'lumoti")],
     ]
     
     # Super admin uchun qo'shimcha tugmalar
@@ -1763,6 +1790,56 @@ async def cmd_assign_groups(m: Message):
     except Exception as e:
         logger.error(f"Error in cmd_assign_groups: {e}")
         await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(Command("edit_payment"))
+async def cmd_edit_payment(m: Message):
+    """Admin uchun to'lov ma'lumotlarini tahrirlash."""
+    if not await is_active_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        # Hozirgi to'lov ma'lumotlarini olish
+        payment_settings = await get_payment_settings()
+        
+        if payment_settings:
+            bank = payment_settings['bank_name']
+            card = payment_settings['card_number']
+            amount = payment_settings['amount']
+            additional = payment_settings.get('additional_info', '') or 'Yo\'q'
+            
+            current_info = (
+                f"💳 <b>Hozirgi to'lov ma'lumotlari:</b>\n\n"
+                f"🏦 Bank: {bank}\n"
+                f"💰 Summa: {amount}\n"
+                f"📋 Karta raqam: {card}\n"
+                f"📝 Qo'shimcha: {additional}\n\n"
+            )
+        else:
+            current_info = "💳 <b>To'lov ma'lumotlari hali kiritilmagan.</b>\n\n"
+        
+        await m.answer(
+            f"{current_info}"
+            f"✏️ <b>Yangi to'lov ma'lumotlarini kiriting</b>\n\n"
+            f"📝 Quyidagi formatda yuboring:\n\n"
+            f"<code>Bank nomi\n"
+            f"Karta raqam\n"
+            f"Summa\n"
+            f"Qo'shimcha ma'lumot (ixtiyoriy)</code>\n\n"
+            f"<b>Misol:</b>\n"
+            f"<code>Xalq Banki\n"
+            f"8600 1234 5678 9012\n"
+            f"150,000 so'm\n"
+            f"To'lov amalga oshirilgandan keyin chekni yuboring</code>",
+            parse_mode="HTML"
+        )
+        
+        # Yangi to'lov ma'lumotlarini kutish
+        WAIT_PAYMENT_EDIT.add(m.from_user.id)
+        logger.info(f"Admin {m.from_user.id} started payment info editing")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_edit_payment: {e}")
+        await m.answer("Xatolik yuz berdi")
 
 @dp.message(Command("edit_contract"))
 async def cmd_edit_contract(m: Message):
@@ -3109,6 +3186,44 @@ async def admin_list_button(m: Message):
     # /admins buyrug'ini chaqirish
     await cmd_admins(m)
 
+@dp.message(F.text == "💳 To'lov ma'lumoti")
+async def admin_edit_payment_button(m: Message):
+    """Admin To'lov ma'lumotini tahrirlash tugmasi handleri."""
+    if not await is_active_admin(m.from_user.id):
+        return
+    
+    try:
+        # Hozirgi to'lov ma'lumotlarini olish
+        payment_settings = await get_payment_settings()
+        
+        if payment_settings:
+            bank = payment_settings['bank_name']
+            card = payment_settings['card_number']
+            amount = payment_settings['amount']
+            additional = payment_settings.get('additional_info', '') or 'Yo\'q'
+            
+            current_info = (
+                f"💳 <b>Hozirgi to'lov ma'lumotlari:</b>\n\n"
+                f"🏦 Bank: {bank}\n"
+                f"💰 Summa: {amount}\n"
+                f"📋 Karta raqam: {card}\n"
+                f"📝 Qo'shimcha: {additional}"
+            )
+        else:
+            current_info = "💳 <b>To'lov ma'lumotlari hali kiritilmagan.</b>"
+        
+        await m.answer(
+            f"{current_info}\n\n"
+            f"✏️ <b>To'lov ma'lumotlarini yangilash:</b>\n\n"
+            f"Quyidagi buyruqni yuboring:\n"
+            f"<code>/edit_payment</code>\n\n"
+            f"📝 Yoki to'g'ridan-to'g'ri /edit_payment buyrug'ini bosing.",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error in admin_edit_payment_button: {e}")
+        await m.answer("Xatolik yuz berdi")
+
 @dp.message(F.text == "📝 Shartnoma tahrirlash")
 async def admin_edit_contract_button(m: Message):
     """Admin Shartnoma tahrirlash tugmasi handleri."""
@@ -3170,6 +3285,51 @@ async def on_admin_date_handler(m: Message):
             
         except Exception as e:
             logger.error(f"Error updating contract: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+        return
+    
+    # To'lov ma'lumotlarini tahrirlash (admin)
+    if m.from_user.id in WAIT_PAYMENT_EDIT:
+        try:
+            lines = (m.text or "").strip().split('\n')
+            
+            if len(lines) < 3:
+                return await m.answer(
+                    "❗ <b>Format noto'g'ri!</b>\n\n"
+                    "Quyidagi formatda kiriting:\n\n"
+                    "<code>Bank nomi\n"
+                    "Karta raqam\n"
+                    "Summa\n"
+                    "Qo'shimcha (ixtiyoriy)</code>",
+                    parse_mode="HTML"
+                )
+            
+            bank_name = lines[0].strip()
+            card_number = lines[1].strip()
+            amount = lines[2].strip()
+            additional_info = lines[3].strip() if len(lines) > 3 else ""
+            
+            if not bank_name or not card_number or not amount:
+                return await m.answer("❗ Bank nomi, karta raqam va summa bo'sh bo'lmasligi kerak!")
+            
+            # To'lov ma'lumotlarini yangilash
+            await update_payment_settings(bank_name, card_number, amount, additional_info, m.from_user.id)
+            WAIT_PAYMENT_EDIT.discard(m.from_user.id)
+            
+            await m.answer(
+                "✅ <b>To'lov ma'lumotlari yangilandi!</b>\n\n"
+                f"🏦 Bank: {bank_name}\n"
+                f"💰 Summa: {amount}\n"
+                f"📋 Karta: {card_number}\n"
+                + (f"📝 Qo'shimcha: {additional_info}\n" if additional_info else "") +
+                "\nEndi o'quvchilar yangi to'lov ma'lumotlarini ko'rishadi.",
+                parse_mode="HTML"
+            )
+            
+            logger.info(f"Admin {m.from_user.id} updated payment settings")
+            
+        except Exception as e:
+            logger.error(f"Error updating payment settings: {e}")
             await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
         return
     
@@ -3335,18 +3495,39 @@ async def on_admin_date_handler(m: Message):
                 WAIT_CONTACT_FOR.discard(m.from_user.id)
                 WAIT_PAYMENT_PHOTO.add(m.from_user.id)
                 
-                # To'lov ma'lumotini olish
-                payment_info = os.getenv("PAYMENT_INFO", "")
+                # To'lov ma'lumotini database'dan olish
+                payment_settings = await get_payment_settings()
                 
-                if not payment_info:
-                    # Agar PAYMENT_INFO yo'q bo'lsa, default xabar
+                if payment_settings:
+                    # Database'dan to'lov ma'lumotlari
+                    bank = payment_settings['bank_name']
+                    card = payment_settings['card_number']
+                    amount = payment_settings['amount']
+                    additional = payment_settings.get('additional_info', '')
+                    
                     payment_info = (
-                        "💳 <b>To'lov ma'lumoti:</b>\n\n"
-                        "🏦 Bank: Xalq Banki\n"
-                        "💰 Summa: 100,000 so'm\n"
-                        "📋 Karta raqam: 8600 **** **** ****\n\n"
-                        "📝 To'lov chekini yuklang!"
+                        f"💳 <b>To'lov ma'lumoti:</b>\n\n"
+                        f"🏦 Bank: {bank}\n"
+                        f"💰 Summa: {amount}\n"
+                        f"📋 Karta raqam: {card}\n"
                     )
+                    
+                    if additional:
+                        payment_info += f"\n📝 {additional}\n"
+                else:
+                    # Agar database'da yo'q bo'lsa, env var yoki default
+                    env_payment_info = os.getenv("PAYMENT_INFO", "")
+                    
+                    if env_payment_info:
+                        payment_info = env_payment_info
+                    else:
+                        # Default xabar
+                        payment_info = (
+                            "💳 <b>To'lov ma'lumoti:</b>\n\n"
+                            "🏦 Bank: Xalq Banki\n"
+                            "💰 Summa: 100,000 so'm\n"
+                            "📋 Karta raqam: 8600 **** **** ****\n"
+                        )
                 
                 await m.answer(
                     f"{payment_info}\n\n"
@@ -3374,23 +3555,45 @@ async def on_contact(m: Message):
         WAIT_CONTACT_FOR.discard(m.from_user.id)
         WAIT_PAYMENT_PHOTO.add(m.from_user.id)
         
-        # To'lov ma'lumotini olish
-        payment_info = os.getenv("PAYMENT_INFO", "")
+        # To'lov ma'lumotini database'dan olish
+        payment_settings = await get_payment_settings()
         
-        if not payment_info:
-            # Agar PAYMENT_INFO yo'q bo'lsa, default xabar
+        if payment_settings:
+            # Database'dan to'lov ma'lumotlari
+            bank = payment_settings['bank_name']
+            card = payment_settings['card_number']
+            amount = payment_settings['amount']
+            additional = payment_settings.get('additional_info', '')
+            
             payment_info = (
-                "💳 <b>To'lov ma'lumoti:</b>\n\n"
-                "🏦 Bank: Xalq Banki\n"
-                "💰 Summa: 100,000 so'm\n"
-                "📋 Karta raqam: 8600 **** **** ****\n\n"
-                "📸 <b>To'lov chekini yuboring!</b>"
+                f"💳 <b>To'lov ma'lumoti:</b>\n\n"
+                f"🏦 Bank: {bank}\n"
+                f"💰 Summa: {amount}\n"
+                f"📋 Karta raqam: {card}\n"
             )
+            
+            if additional:
+                payment_info += f"\n📝 {additional}\n"
+        else:
+            # Agar database'da yo'q bo'lsa, env var yoki default
+            env_payment_info = os.getenv("PAYMENT_INFO", "")
+            
+            if env_payment_info:
+                payment_info = env_payment_info
+            else:
+                # Default xabar
+                payment_info = (
+                    "💳 <b>To'lov ma'lumoti:</b>\n\n"
+                    "🏦 Bank: Xalq Banki\n"
+                    "💰 Summa: 100,000 so'm\n"
+                    "📋 Karta raqam: 8600 **** **** ****\n"
+                )
         
         # User'ga to'lov ma'lumoti va chek yuborish ko'rsatmasi
         await m.answer(
             f"✅ <b>Telefon raqam qabul qilindi!</b>\n\n"
             f"{payment_info}\n\n"
+            f"📸 <b>To'lov chekini yuboring!</b>\n\n"
             f"⏳ To'lovni amalga oshirgandan so'ng, <b>chek rasmini</b> yuboring.",
             parse_mode="HTML"
         )
