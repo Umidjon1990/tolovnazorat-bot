@@ -4210,25 +4210,108 @@ async def cb_warn_kick(c: CallbackQuery):
         if not await check_group_access(c.from_user.id, gid):
             return await c.answer("❌ Sizga bu guruhga ruxsat yo'q!", show_alert=True)
         
+        # Guruh nomini olish
+        titles = dict(await resolve_group_titles())
+        group_name = titles.get(gid, f"Guruh {gid}")
+        
         try:
             member = await bot.get_chat_member(gid, uid)
             if member.status in ("administrator", "creator"):
                 await c.message.answer("❗ Bu foydalanuvchi guruhda admin/egadir. Chiqarib bo'lmaydi.")
                 return await c.answer()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Could not check member status for {uid} in {gid}: {e}")
+        
         try:
+            # Avval bot'ning admin ekanligini tekshirish
+            try:
+                bot_member = await bot.get_chat_member(gid, bot.id)
+                if bot_member.status not in ("administrator", "creator"):
+                    await c.message.answer(
+                        f"❌ <b>Xatolik!</b>\n\n"
+                        f"Bot <b>{group_name}</b> guruhida admin emas.\n\n"
+                        f"✅ Botni guruhda admin qiling va <b>\"Foydalanuvchilarni cheklash\"</b> huquqini bering.",
+                        parse_mode="HTML"
+                    )
+                    logger.error(f"Bot is not admin in group {gid}")
+                    return await c.answer("Bot guruhda admin emas!", show_alert=True)
+                
+                # Bot adminlik huquqlarini tekshirish
+                if not bot_member.can_restrict_members:
+                    await c.message.answer(
+                        f"❌ <b>Xatolik!</b>\n\n"
+                        f"Bot'da <b>{group_name}</b> guruhida yetarli huquq yo'q.\n\n"
+                        f"✅ Bot uchun <b>\"Foydalanuvchilarni cheklash\"</b> huquqini yoqing.",
+                        parse_mode="HTML"
+                    )
+                    logger.error(f"Bot does not have restrict_members permission in group {gid}")
+                    return await c.answer("Bot'da huquq yetarli emas!", show_alert=True)
+            except Exception as e:
+                logger.error(f"Could not check bot permissions in group {gid}: {e}")
+                await c.message.answer(
+                    f"❌ <b>Xatolik!</b>\n\n"
+                    f"Guruh holatini tekshirib bo'lmadi: {e}\n\n"
+                    f"Bot guruhda admin ekanligini va <b>\"Foydalanuvchilarni cheklash\"</b> huquqi borligini tekshiring.",
+                    parse_mode="HTML"
+                )
+                return await c.answer("Guruh holatini tekshirib bo'lmadi", show_alert=True)
+            
+            # Endi guruhdan chiqarish
             await bot.ban_chat_member(gid, uid)
             await bot.unban_chat_member(gid, uid)
             await clear_user_group(uid, gid)
             await clear_user_group_extra(uid, gid)
-            await c.message.answer(f"❌ {uid} guruhdan chiqarildi.")
+            
+            # Muvaffaqiyatli xabar
+            uname, _ = await fetch_user_profile(uid)
+            user_link = f"[{uname or uid}](tg://user?id={uid})"
+            
+            await c.message.answer(
+                f"✅ <b>Guruhdan chiqarildi!</b>\n\n"
+                f"👤 Foydalanuvchi: {user_link}\n"
+                f"🆔 ID: <code>{uid}</code>\n"
+                f"📍 Guruh: {group_name}",
+                parse_mode="HTML"
+            )
+            
+            logger.info(f"User {uid} was kicked from group {gid} by admin {c.from_user.id}")
+            
+            # Foydalanuvchiga xabar yuborish
             try:
-                await bot.send_message(uid, "❌ Obuna yangilanmagani sababli guruhdan chiqarildingiz.")
+                await bot.send_message(
+                    uid, 
+                    f"❌ <b>Obuna yangilanmagani sababli guruhdan chiqarildingiz.</b>\n\n"
+                    f"📍 Guruh: {group_name}\n\n"
+                    f"📞 Admin bilan bog'laning.",
+                    parse_mode="HTML"
+                )
             except Exception as e:
                 logger.warning(f"Failed to notify kicked user {uid}: {e}")
         except Exception as e:
-            await c.message.answer(f"Chiqarishda xato: {e}")
+            error_msg = str(e)
+            logger.error(f"Error kicking user {uid} from group {gid}: {e}")
+            
+            # Aniqroq xato xabarlari
+            if "not enough rights" in error_msg.lower() or "CHAT_ADMIN_REQUIRED" in error_msg:
+                await c.message.answer(
+                    f"❌ <b>Xatolik!</b>\n\n"
+                    f"Bot'da <b>{group_name}</b> guruhida yetarli huquq yo'q.\n\n"
+                    f"✅ Botni guruhda admin qiling va <b>\"Foydalanuvchilarni cheklash\"</b> huquqini bering.",
+                    parse_mode="HTML"
+                )
+            elif "user not found" in error_msg.lower():
+                await c.message.answer(
+                    f"❌ Foydalanuvchi guruhda topilmadi.\n\n"
+                    f"Ehtimol allaqachon chiqib ketgan."
+                )
+            else:
+                await c.message.answer(
+                    f"❌ <b>Chiqarishda xato:</b>\n\n"
+                    f"<code>{error_msg}</code>\n\n"
+                    f"📍 Guruh: {group_name}",
+                    parse_mode="HTML"
+                )
+        
         await c.answer()
     except Exception as e:
         logger.error(f"Error in cb_warn_kick: {e}")
