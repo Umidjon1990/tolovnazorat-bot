@@ -3173,21 +3173,9 @@ async def on_admin_date_handler(m: Message):
             await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
         return
     
-    # Ism-familiya qabul qilish (yangi ro'yxatdan o'tish tizimi)
+    # Ism-familiya qabul qilish (payment-first registration - guruh a'zoligi shart emas)
     if m.from_user.id in WAIT_FULLNAME_FOR:
         try:
-            # Guruh a'zoligini qayta tekshirish
-            if not is_admin(m.from_user.id):
-                is_member = await is_member_of_any_group(m.from_user.id)
-                if not is_member:
-                    WAIT_FULLNAME_FOR.discard(m.from_user.id)
-                    await m.answer(
-                        "⚠️ <b>Kechirasiz, siz hozir guruh a'zosi emassiz.</b>\n\n"
-                        "Botdan foydalanish uchun avval guruhga qo'shiling va qaytadan /start bosing.",
-                        parse_mode="HTML"
-                    )
-                    return
-            
             fullname = (m.text or "").strip()
             if len(fullname) < 3:
                 return await m.answer("❗ Iltimos, to'liq ismingizni kiriting (kamida 3 ta harf)")
@@ -3338,65 +3326,37 @@ async def on_admin_date_handler(m: Message):
         return
     
     if m.from_user.id in WAIT_CONTACT_FOR:
-        # Guruh a'zoligini qayta tekshirish
-        if not is_admin(m.from_user.id):
-            is_member = await is_member_of_any_group(m.from_user.id)
-            if not is_member:
-                WAIT_CONTACT_FOR.discard(m.from_user.id)
-                await m.answer(
-                    "⚠️ <b>Kechirasiz, siz hozir guruh a'zosi emassiz.</b>\n\n"
-                    "Botdan foydalanish uchun avval guruhga qo'shiling va qaytadan /start bosing.",
-                    parse_mode="HTML"
-                )
-                return
-        
+        # Payment-first registration - guruh a'zoligi shart emas
         phone_pattern = re.compile(r"^\+?\d{9,15}$")
         if phone_pattern.match((m.text or "").strip()):
             try:
                 phone = m.text.strip()
                 await update_user_phone(m.from_user.id, phone)
                 WAIT_CONTACT_FOR.discard(m.from_user.id)
+                WAIT_PAYMENT_PHOTO.add(m.from_user.id)
                 
-                # User ma'lumotlarini olish
-                user_row = await get_user(m.from_user.id)
-                fullname = user_row[3] if user_row and len(user_row) > 3 else f"User{m.from_user.id}"
-                username, _ = await fetch_user_profile(m.from_user.id)
+                # To'lov ma'lumotini olish
+                payment_info = os.getenv("PAYMENT_INFO", "")
                 
-                # User'ga tasdiqlash kutilayotgani haqida xabar
+                if not payment_info:
+                    # Agar PAYMENT_INFO yo'q bo'lsa, default xabar
+                    payment_info = (
+                        "💳 <b>To'lov ma'lumoti:</b>\n\n"
+                        "🏦 Bank: Xalq Banki\n"
+                        "💰 Summa: 100,000 so'm\n"
+                        "📋 Karta raqam: 8600 **** **** ****\n\n"
+                        "📝 To'lov chekini yuklang!"
+                    )
+                
                 await m.answer(
-                    "✅ *Ro'yxatdan o'tish so'rovi yuborildi!*\n\n"
-                    "⏳ Admin tasdiqlashini kuting.\n"
-                    "Tez orada xabar beramiz!",
-                    parse_mode="Markdown"
+                    f"{payment_info}\n\n"
+                    "📸 <b>To'lov chekini yuklang:</b>\n\n"
+                    "To'lov qilganingizdan so'ng chekni surat qilib yuboring.\n"
+                    "Admin tekshirib, tasdiqlaydi.",
+                    parse_mode="HTML"
                 )
                 
-                # Admin'ga tasdiqlash so'rovi yuborish
-                chat_link = f"📧 [{username}](tg://user?id={m.from_user.id})" if username else f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
-                
-                for admin_id in ADMIN_IDS:
-                    try:
-                        kb = InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="✅ Bugundan tasdiqlash", callback_data=f"reg_approve_now:{m.from_user.id}")],
-                            [InlineKeyboardButton(text="📅 Sana tanlash", callback_data=f"reg_approve_date:{m.from_user.id}")],
-                            [InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reg_reject:{m.from_user.id}")]
-                        ])
-                        
-                        await bot.send_message(
-                            admin_id,
-                            f"📝 *YANGI RO'YXATDAN O'TISH SO'ROVI*\n\n"
-                            f"👤 {fullname}\n"
-                            f"{chat_link}\n"
-                            f"📞 Telefon: {phone}\n"
-                            f"🆔 User ID: `{m.from_user.id}`\n\n"
-                            f"Admin, tasdiqlaysizmi?",
-                            reply_markup=kb,
-                            parse_mode="Markdown"
-                        )
-                        
-                        logger.info(f"Registration request sent to admin {admin_id} for user {m.from_user.id}")
-                        
-                    except Exception as e:
-                        logger.error(f"Failed to send registration request to admin {admin_id}: {e}")
+                logger.info(f"Payment info sent to user {m.from_user.id}, waiting for photo")
                 
             except Exception as e:
                 logger.error(f"Error processing phone text: {e}")
