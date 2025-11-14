@@ -865,44 +865,11 @@ async def cmd_start(m: Message):
             )
             return
         
-        # Guruh a'zoligini tekshirish va batafsil ma'lumot ko'rsatish
-        titles = dict(await resolve_group_titles())
-        
-        # Har bir guruhda a'zoligini real-time tekshirish
-        member_groups = []
-        non_member_groups = []
-        
-        for gid in GROUP_IDS:
-            try:
-                member = await bot.get_chat_member(gid, m.from_user.id)
-                if member.status in ['member', 'administrator', 'creator']:
-                    group_name = titles.get(gid, f"Guruh {gid}")
-                    member_groups.append(group_name)
-                else:
-                    group_name = titles.get(gid, f"Guruh {gid}")
-                    non_member_groups.append(group_name)
-            except Exception:
-                group_name = titles.get(gid, f"Guruh {gid}")
-                non_member_groups.append(group_name)
-        
-        # Agar hech qaysi guruhda bo'lmasa
-        if not member_groups:
-            await m.answer(
-                "⚠️ <b>Botdan foydalanish uchun avval guruhga qo'shilishingiz kerak!</b>\n\n"
-                "📞 Admin bilan bog'laning.",
-                parse_mode="HTML"
-            )
-            logger.info(f"User {m.from_user.id} is not a member of any group - registration blocked")
-            return
-        
-        # Foydalanuvchiga qaysi guruhlarda ekanligini ko'rsatish
-        logger.info(f"User {m.from_user.id} is member of {len(member_groups)} group(s): {member_groups}")
-        
         # Avval ro'yxatdan o'tganlarni tekshirish
         user_row = await get_user(m.from_user.id)
         
         if user_row:
-            # Foydalanuvchi database'da bor - barcha guruhlar bo'yicha obuna holatini tekshirish
+            # Foydalanuvchi database'da bor - obuna holatini tekshirish
             user_id, group_id, expires_at, username, full_name, phone, agreed_at = user_row
             now = int(datetime.utcnow().timestamp())
             
@@ -951,10 +918,6 @@ async def cmd_start(m: Message):
                     f"📞 Telefon: {phone or 'Belgilanmagan'}\n"
                 ]
                 
-                # Guruh a'zoligini ko'rsatish
-                if member_groups:
-                    lines.append(f"📍 <b>Siz a'zosisiz:</b> {', '.join(member_groups)}\n")
-                
                 for group_name, exp_str, days_left in active_subscriptions:
                     lines.append(f"🏷 <b>{group_name}</b>")
                     lines.append(f"   📅 Tugash: {exp_str}")
@@ -983,7 +946,7 @@ async def cmd_start(m: Message):
                     for group_name, exp_str in expired_subscriptions:
                         lines.append(f"🏷 {group_name} - Tugagan: {exp_str}")
                 
-                lines.append("\n📝 Obunani yangilash uchun admin bilan boglaning.")
+                lines.append("\n📝 Obunani yangilash uchun to'lov qiling.")
                 
                 await m.answer("\n".join(lines), parse_mode="HTML")
                 logger.info(f"User {m.from_user.id} has no active subscriptions")
