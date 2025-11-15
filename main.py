@@ -611,6 +611,7 @@ async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tu
     """Guruh ID'larini nomlariga aylantirish.
     
     Priority: Database names > Telegram API > Group ID
+    Auto-updates database if name is empty or default "Guruh #N"
     
     Args:
         group_ids: Agar berilsa, faqat shu guruhlar. Aks holda, barcha GROUP_IDS.
@@ -623,7 +624,8 @@ async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tu
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("SELECT group_id, name FROM groups")
             for row in rows:
-                if row['name'] and row['name'].strip():
+                # Faqat real nomlar, default "Guruh #N" emas
+                if row['name'] and row['name'].strip() and not row['name'].startswith("Guruh #"):
                     db_titles[row['group_id']] = row['name']
     except Exception as e:
         logger.warning(f"Failed to fetch group names from database: {e}")
@@ -635,10 +637,22 @@ async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tu
         if gid in db_titles:
             title = db_titles[gid]
         else:
-            # Database'da nom yo'q bo'lsa, Telegram API'dan olish (fallback)
+            # Database'da nom yo'q yoki default nom bo'lsa, Telegram API'dan olish
             try:
                 chat = await bot.get_chat(gid)
                 title = chat.title or str(gid)
+                
+                # Database'ni yangilash (agar nom topilsa)
+                if title != str(gid):
+                    try:
+                        async with db_pool.acquire() as conn:
+                            await conn.execute(
+                                "UPDATE groups SET name=$1 WHERE group_id=$2",
+                                title, gid
+                            )
+                        logger.info(f"Updated group name in database: {gid} -> {title}")
+                    except Exception as update_err:
+                        logger.warning(f"Failed to update group name in database: {update_err}")
             except Exception as e:
                 logger.warning(f"Failed to get title for group {gid}: {e}")
                 title = str(gid)
@@ -952,28 +966,36 @@ async def on_chat_member_updated(event: ChatMemberUpdated):
                 
                 logger.info(f"Subscription started for user {user.id} in {event.chat.type} {event.chat.id} - expires at {expiry_date}")
             else:
-                # Agar payment yo'q yoki pending bo'lsa - welcome message yuborish
-                user_mention = f"[{user.first_name}](tg://user?id={user.id})"
-                bot_username = (await bot.get_me()).username
-                
-                welcome_text = (
-                    f"👋 Salom {user_mention}!\n\n"
-                    f"🎓 Guruhga xush kelibsiz!\n\n"
-                    f"📝 Obuna boshlanishi uchun:\n"
-                    f"1️⃣ Mening private chatimda start bosing: @{bot_username}\n"
-                    f"2️⃣ Ism-familiya va telefon raqamingizni yuboring\n"
-                    f"3️⃣ To'lov chekini yuklang\n"
-                    f"4️⃣ Admin tasdiqlashi kutiladi\n\n"
-                    f"✅ Admin tasdiqlagach, guruhga qo'shilasiz!"
-                )
-                
-                await bot.send_message(
-                    chat_id=event.chat.id,
-                    text=welcome_text,
-                    parse_mode="Markdown"
-                )
-                
-                logger.info(f"Welcome message sent to user {user.id} in group {event.chat.id}")
+                # Payment-first workflow: User guruhga faqat admin tasdiqidan keyin qo'shiladi
+                # Agar payment approved bo'lmasa - bu noto'g'ri holat (edge case: admin to'g'ridan qo'shgan)
+                # User'ni guruhdan chiqarish va admin'ga xabar yuborish
+                try:
+                    # User'ni guruhdan chiqarish
+                    await bot.ban_chat_member(event.chat.id, user.id)
+                    await bot.unban_chat_member(event.chat.id, user.id)  # Ban'ni olib tashlash (faqat guruhdan chiqarish)
+                    
+                    logger.warning(f"User {user.id} joined group {event.chat.id} without approved payment - removed from group")
+                    
+                    # User'ga xabar yuborish
+                    bot_username = (await bot.get_me()).username
+                    try:
+                        await bot.send_message(
+                            chat_id=user.id,
+                            text=(
+                                f"⚠️ *Guruhga kirish rad etildi*\n\n"
+                                f"Siz guruhga to'g'ridan qo'shilgansiz, lekin obuna aktiv emas.\n\n"
+                                f"📝 Obuna olish uchun:\n"
+                                f"1️⃣ Mening chatimda /start bosing: @{bot_username}\n"
+                                f"2️⃣ To'lov qiling va admin tasdiqini kuting\n\n"
+                                f"✅ Admin tasdiqlagach, sizga invite link yuboriladi."
+                            ),
+                            parse_mode="Markdown"
+                        )
+                    except Exception as msg_err:
+                        logger.warning(f"Failed to send removal notice to user {user.id}: {msg_err}")
+                    
+                except Exception as remove_err:
+                    logger.error(f"Failed to remove unapproved user {user.id} from group {event.chat.id}: {remove_err}")
             
     except Exception as e:
         logger.error(f"Error in on_chat_member_updated: {e}")
