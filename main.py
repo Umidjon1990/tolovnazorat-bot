@@ -2407,6 +2407,98 @@ async def cmd_unregistered(m: Message):
         logger.error(f"Error in cmd_unregistered: {e}")
         await m.answer(f"Xatolik yuz berdi: {str(e)}")
 
+@dp.message(Command("subscribers"))
+async def cmd_subscribers(m: Message):
+    """Barcha aktiv obunachilarni ko'rsatish - Telegram guruhdan haqiqiy ma'lumot."""
+    if not await is_active_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        # Ruxsat etilgan guruhlarni olish
+        allowed_groups = await get_allowed_groups(m.from_user.id)
+        if not allowed_groups:
+            return await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
+        
+        processing_msg = await m.answer("⏳ Guruh a'zolarini tekshiryapman...")
+        
+        now = int(datetime.utcnow().timestamp())
+        titles = dict(await resolve_group_titles(allowed_groups))
+        
+        total_subscribers = 0
+        
+        for gid in allowed_groups:
+            gtitle = titles.get(gid, f"Guruh {gid}")
+            
+            # Database'dagi userlar
+            db_users = await all_members_of_group(gid)
+            active_db_users = {
+                uid: (username, full_name, exp, phone)
+                for uid, username, full_name, exp, phone in db_users
+                if exp and exp > now
+            }
+            
+            # Telegram'dagi haqiqiy memberlar
+            real_members = []
+            for uid in active_db_users.keys():
+                try:
+                    member = await bot.get_chat_member(gid, uid)
+                    if member.status in ["member", "administrator", "creator"]:
+                        username, full_name, exp, phone = active_db_users[uid]
+                        days_left = max(0, int((exp - now) / 86400))
+                        real_members.append({
+                            'uid': uid,
+                            'username': username,
+                            'fullname': full_name,
+                            'phone': phone,
+                            'exp': exp,
+                            'days_left': days_left
+                        })
+                except Exception:
+                    pass
+            
+            if not real_members:
+                await m.answer(f"🏷 <b>{gtitle}</b>\n\n❌ Aktiv obunachi yo'q", parse_mode="HTML")
+                continue
+            
+            # Sort by expiry (soonest first)
+            real_members.sort(key=lambda x: x['exp'])
+            
+            total_subscribers += len(real_members)
+            
+            lines = [f"🏷 <b>{gtitle}</b> — {len(real_members)} ta obunachi\n"]
+            
+            for i, sub in enumerate(real_members[:50], start=1):
+                name = sub['fullname'] or f"User{sub['uid']}"
+                safe_name = name.replace('<', '&lt;').replace('>', '&gt;')
+                username = sub['username']
+                user_tag = f"@{username}" if username else safe_name
+                phone_str = f" 📞 {sub['phone']}" if sub['phone'] else ""
+                days_str = f"{sub['days_left']} kun"
+                
+                lines.append(f"{i}. {user_tag}{phone_str}")
+                lines.append(f"   • ID: <code>{sub['uid']}</code>")
+                lines.append(f"   • ⏳ Qoldi: {days_str}\n")
+            
+            if len(real_members) > 50:
+                lines.append(f"... va yana {len(real_members) - 50} ta")
+            
+            await m.answer("\n".join(lines), parse_mode="HTML")
+        
+        await processing_msg.delete()
+        
+        summary = (
+            f"✅ <b>JAMI OBUNCHILAR: {total_subscribers} ta</b>\n\n"
+            f"📚 Guruhlar soni: {len(allowed_groups)}\n"
+            f"🔍 Faqat Telegram guruhda haqiqatan turgan va aktiv obunasi bor foydalanuvchilar ko'rsatildi."
+        )
+        await m.answer(summary, parse_mode="HTML")
+        
+        logger.info(f"Admin {m.from_user.id} checked subscribers: {total_subscribers} found")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_subscribers: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
 @dp.message(Command("stats"))
 async def cmd_stats(m: Message):
     if not await is_active_admin(m.from_user.id):
