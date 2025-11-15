@@ -636,35 +636,30 @@ async def get_group_type(group_id: int) -> str:
         return 'group'  # Default
 
 async def send_one_time_link(group_id: int, user_id: int) -> str:
-    """24 soatlik invite link yaratish (guruh/kanal uchun).
+    """24 soatlik bir martalik invite link yaratish (guruh/kanal uchun).
     
     Args:
         group_id: Guruh/Kanal ID
         user_id: User ID (link nomi uchun)
     
     Returns:
-        24 soat amal qiladigan invite link
+        24 soat amal qiladigan, 1 martalik link
+    
+    Note:
+        member_limit=1 guruh VA kanal uchun ishlaydi (Telegram Bot API 5.1+)
     """
     expire_date = datetime.utcnow() + timedelta(hours=24)
-    group_type = await get_group_type(group_id)
     
-    if group_type == 'channel':
-        # Kanal uchun: member_limit ishlamaydi, faqat expire_date
-        link = await bot.create_chat_invite_link(
-            chat_id=group_id,
-            name=f"sub-{user_id}",
-            expire_date=expire_date,  # 24 soatdan keyin amal qilmaydi
-            creates_join_request=False  # Avtomatik kirish, approval yo'q
-        )
-    else:
-        # Guruh uchun: member_limit=1 (bir martalik)
-        link = await bot.create_chat_invite_link(
-            chat_id=group_id,
-            name=f"sub-{user_id}",
-            member_limit=1,  # Faqat 1 kishi kirishi mumkin (bir martalik)
-            expire_date=expire_date,  # 24 soatdan keyin amal qilmaydi
-            creates_join_request=False  # Avtomatik kirish, approval yo'q
-        )
+    # Guruh ham, kanal ham uchun bir xil logika
+    # member_limit=1 → faqat 1 kishi ishlatishi mumkin (bir martalik)
+    # expire_date → 24 soatdan keyin link o'chadi
+    link = await bot.create_chat_invite_link(
+        chat_id=group_id,
+        name=f"sub-{user_id}",
+        member_limit=1,  # FAQAT 1 KISHI kirishi mumkin (guruh VA kanal uchun)
+        expire_date=expire_date,  # 24 soatdan keyin amal qilmaydi
+        creates_join_request=False  # Avtomatik kirish, admin tasdiq yo'q
+    )
     
     return link.invite_link
 
