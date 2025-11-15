@@ -84,6 +84,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - **Statistics**:
     - `/stats` - Overall statistics
     - `/gstats` - Detailed group statistics
+    - `/subscribers` - View all active subscribers (real Telegram group members with active subscriptions)
     - "👥 Guruh o'quvchilari" button - View all users by group with details
   - **User Management**:
     - `/add_user USER_ID [DATE]` - Manually add single user (bugundan or YYYY-MM-DD)
@@ -99,6 +100,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - Subscription expiry warnings with action buttons (only to active group members)
   - Admin expiry auto-deactivation (runs every 60 seconds)
   - Smart warning system: checks group membership before sending, filters admins by group access
+  - **Auto-cleanup for invalid groups**: Automatically removes groups from database when "chat not found" error occurs, with cache to prevent duplicate notifications
 
 ## UI/UX Decisions
 - **Admin Panel**: Persistent reply keyboard with role-based buttons:
@@ -123,14 +125,40 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Profile Name & Chat Link Fix**: Uses `fetch_user_profile()` from Telegram API for fresh user names in all payment-related messages, ensuring consistency
 - **Telegram Mini App (Legacy Workflow)**: React frontend (Vite) and FastAPI backend for user registration, course selection, payment submission, and admin operations. Features Telegram `initData` verification for authentication
 
+# Deployment Architecture
+
+## Production vs Development Environments
+
+### **Railway (Production)**
+- **Status**: Active production bot with 103+ subscribers
+- **Database**: Railway internal PostgreSQL (postgres.railway.internal)
+- **Deployment**: Auto-deploy from GitHub main branch
+- **Purpose**: Live bot serving real users
+- **Security**: Internal database hostname prevents external access
+
+### **Replit (Development)**
+- **Status**: Development and testing environment
+- **Database**: Separate Neon PostgreSQL for testing (4 test users)
+- **Deployment**: Manual code changes, git push to GitHub
+- **Purpose**: Feature development, code testing, bug fixes
+- **Workflow**: Code → Test → Git Push → Railway Auto-Deploy
+
+### **Development Workflow**
+1. Write code and test features in Replit
+2. Commit changes: `git add . && git commit -m "message"`
+3. Push to GitHub: `git push origin main`
+4. Railway automatically deploys new code
+5. 103+ production users benefit from updates
+
 # External Dependencies
 
 - **Telegram Bot API**: Core service for bot functionality, message delivery, and user interaction.
 - **Python Libraries**:
-    - `aiogram`: Telegram Bot API framework.
-    - `asyncpg`: Asynchronous PostgreSQL database driver.
-    - `python-dotenv`: Environment variable management.
-    - `reportlab`: PDF generation for contracts.
+    - `aiogram==3.22.0`: Telegram Bot API framework.
+    - `asyncpg==0.30.0`: Asynchronous PostgreSQL database driver.
+    - `python-dotenv==1.1.1`: Environment variable management.
+    - `reportlab==4.4.4`: PDF generation for contracts.
+    - `python-multipart==0.0.20`: Multipart form data parsing.
     - Standard Python libraries (`asyncio`, `logging`, `datetime`, etc.).
-- **Database**: PostgreSQL (deployed with persistent volumes, e.g., on Railway).
+- **Database**: PostgreSQL (Railway internal for production, Neon for development).
 - **Telegram WebApp SDK**: Used by the React Mini App for integration with Telegram features.
