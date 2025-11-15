@@ -76,11 +76,11 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
     - `/remove_group GROUP_ID` - Remove group
   - **Admin Management** (Super Admin Only):
     - `/admins` - List all admins with status, role, expiry
-    - `/add_admin USER_ID MUDDATI` - Add new admin (30 days or 0 for unlimited)
+    - `/add_admin USER_ID MUDDATI` - Add new admin (30=30 days, 0=unlimited, simple day-based)
     - `/remove_admin USER_ID` - Remove admin
     - `/pause_admin USER_ID` - Temporarily deactivate admin
     - `/resume_admin USER_ID` - Reactivate paused admin
-    - `/extend_admin USER_ID MUDDATI` - Extend admin expiration
+    - `/extend_admin USER_ID MUDDATI` - Extend admin expiration (adds days to current expiry, 0=unlimited)
   - **Statistics**:
     - `/stats` - Overall statistics
     - `/gstats` - Detailed group statistics
