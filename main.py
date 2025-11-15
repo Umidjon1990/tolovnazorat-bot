@@ -1014,28 +1014,44 @@ async def cmd_start(m: Message):
             expired_subscriptions = []
             
             # Asosiy guruhni tekshirish (users jadvalidan)
-            if expires_at and expires_at > now:
-                exp_str, days_left = human_left(expires_at)
-                group_name = titles.get(group_id, f"Guruh {group_id}")
-                active_subscriptions.append((group_name, exp_str, days_left))
-            elif expires_at:
-                exp_str, days_left = human_left(expires_at)
-                group_name = titles.get(group_id, f"Guruh {group_id}")
-                expired_subscriptions.append((group_name, exp_str))
+            if expires_at and group_id:
+                # Telegram'dan guruh a'zoligini tekshirish
+                try:
+                    member = await bot.get_chat_member(group_id, m.from_user.id)
+                    if member.status in ("member", "administrator", "creator"):
+                        if expires_at > now:
+                            exp_str, days_left = human_left(expires_at)
+                            group_name = titles.get(group_id, f"Guruh {group_id}")
+                            active_subscriptions.append((group_name, exp_str, days_left))
+                        else:
+                            exp_str, days_left = human_left(expires_at)
+                            group_name = titles.get(group_id, f"Guruh {group_id}")
+                            expired_subscriptions.append((group_name, exp_str))
+                except Exception as e:
+                    logger.debug(f"User {m.from_user.id} not in group {group_id}: {e}")
             
             # Qo'shimcha guruhlarni tekshirish (user_groups jadvalidan)
             for row in user_groups_rows:
                 gid = row['group_id']
                 exp = row['expires_at']
                 
-                if exp and exp > now:
-                    exp_str, days_left = human_left(exp)
-                    group_name = titles.get(gid, f"Guruh {gid}")
-                    active_subscriptions.append((group_name, exp_str, days_left))
-                elif exp:
-                    exp_str, days_left = human_left(exp)
-                    group_name = titles.get(gid, f"Guruh {gid}")
-                    expired_subscriptions.append((group_name, exp_str))
+                if not exp or not gid:
+                    continue
+                
+                # Telegram'dan guruh a'zoligini tekshirish
+                try:
+                    member = await bot.get_chat_member(gid, m.from_user.id)
+                    if member.status in ("member", "administrator", "creator"):
+                        if exp > now:
+                            exp_str, days_left = human_left(exp)
+                            group_name = titles.get(gid, f"Guruh {gid}")
+                            active_subscriptions.append((group_name, exp_str, days_left))
+                        else:
+                            exp_str, days_left = human_left(exp)
+                            group_name = titles.get(gid, f"Guruh {gid}")
+                            expired_subscriptions.append((group_name, exp_str))
+                except Exception as e:
+                    logger.debug(f"User {m.from_user.id} not in group {gid}: {e}")
             
             # Natijalarni ko'rsatish
             if active_subscriptions:
