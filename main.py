@@ -3214,6 +3214,66 @@ async def admin_add_group_button(m: Message):
         parse_mode="HTML"
     )
 
+@dp.message(F.text == "📋 Guruhlar ro'yxati")
+async def admin_groups_list_button(m: Message):
+    """Guruhlar ro'yxatini ko'rsatish va boshqarish."""
+    if not await is_active_admin(m.from_user.id):
+        return await m.answer("⛔ Bu tugma faqat adminlar uchun.")
+    
+    try:
+        # Faqat ruxsat etilgan guruhlarni olish
+        allowed_groups = await get_allowed_groups(m.from_user.id)
+        
+        if not allowed_groups:
+            return await m.answer("📋 Sizda hech qanday guruh yo'q.")
+        
+        # Guruh ma'lumotlarini olish
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT group_id, name, type, created_at 
+                FROM groups 
+                WHERE group_id = ANY($1::bigint[])
+                ORDER BY created_at DESC
+            """, allowed_groups)
+        
+        if not rows:
+            return await m.answer("📋 Guruhlar ro'yxati bo'sh.")
+        
+        # Inline keyboard yaratish - har bir guruh uchun o'chirish tugmasi
+        keyboard = []
+        for row in rows:
+            gid = row['group_id']
+            name = row['name']
+            gtype = row['type']
+            
+            # Guruh turi emoji
+            type_emoji = "📢" if gtype == "channel" else "👥"
+            
+            # Har bir guruh uchun 2 ta tugma: Ma'lumot va O'chirish
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{type_emoji} {name}",
+                    callback_data=f"group_info:{gid}"
+                ),
+                InlineKeyboardButton(
+                    text="🗑 O'chirish",
+                    callback_data=f"group_delete:{gid}"
+                )
+            ])
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
+        
+        await m.answer(
+            f"📋 <b>Guruhlar ro'yxati</b>\n\n"
+            f"📊 Jami: {len(rows)} ta guruh/kanal\n\n"
+            f"💡 Guruhni o'chirish uchun 🗑 tugmasini bosing.",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error in admin_groups_list_button: {e}")
+        await m.answer("Xatolik yuz berdi")
+
 @dp.message(F.text == "👥 Adminlar")
 async def admin_list_button(m: Message):
     """Admin Adminlar ro'yxati tugmasi handleri."""
