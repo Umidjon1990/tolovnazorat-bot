@@ -1072,13 +1072,18 @@ async def cmd_start(m: Message):
                         lines.append(f"\n🏦 Bank: {bank}")
                         lines.append(f"💰 Summa: {amount}")
                         lines.append(f"💳 Karta: <code>{card}</code>")
-                        lines.append("\n📸 To'lovni amalga oshiring va chek rasmini shu botga yuboring.")
+                        lines.append("\n📸 To'lovni amalga oshiring va quyidagi tugmani bosing.")
                     else:
-                        lines.append("\n📸 To'lov chekini shu botga yuboring.")
+                        lines.append("\n📸 To'lov qilish uchun quyidagi tugmani bosing.")
                 except Exception:
-                    lines.append("\n📸 To'lov chekini shu botga yuboring.")
+                    lines.append("\n📸 To'lov qilish uchun quyidagi tugmani bosing.")
                 
-                await m.answer("\n".join(lines), parse_mode="HTML")
+                # Tugma orqali to'lov qilish
+                renewal_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 To'lov qilish", callback_data="renew_payment")]
+                ])
+                
+                await m.answer("\n".join(lines), parse_mode="HTML", reply_markup=renewal_kb)
                 logger.info(f"User {m.from_user.id} has {len(active_subscriptions)} active subscription(s)")
                 return
             else:
@@ -1096,7 +1101,32 @@ async def cmd_start(m: Message):
                 
                 lines.append("\n📝 Obunani yangilash uchun to'lov qiling.")
                 
-                await m.answer("\n".join(lines), parse_mode="HTML")
+                # To'lov ma'lumotlarini ko'rsatish
+                lines.append("\n" + "─" * 30)
+                lines.append("\n💳 <b>To'lov qilish:</b>")
+                
+                try:
+                    payment_settings = await get_payment_settings()
+                    if payment_settings:
+                        bank = payment_settings['bank_name']
+                        card = payment_settings['card_number']
+                        amount = payment_settings['amount']
+                        
+                        lines.append(f"\n🏦 Bank: {bank}")
+                        lines.append(f"💰 Summa: {amount}")
+                        lines.append(f"💳 Karta: <code>{card}</code>")
+                        lines.append("\n📸 To'lovni amalga oshiring va quyidagi tugmani bosing.")
+                    else:
+                        lines.append("\n📸 To'lov qilish uchun quyidagi tugmani bosing.")
+                except Exception:
+                    lines.append("\n📸 To'lov qilish uchun quyidagi tugmani bosing.")
+                
+                # Tugma orqali to'lov qilish
+                renewal_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 To'lov qilish", callback_data="renew_payment")]
+                ])
+                
+                await m.answer("\n".join(lines), parse_mode="HTML", reply_markup=renewal_kb)
                 logger.info(f"User {m.from_user.id} has no active subscriptions")
                 return
         
@@ -1134,6 +1164,52 @@ async def cb_terms_agree(c: CallbackQuery):
 async def cb_terms_decline(c: CallbackQuery):
     await c.message.answer("❌ Shartnoma rad etildi. Xizmatlardan foydalanish uchun shartnomani tasdiqlash kerak.")
     await c.answer()
+
+@dp.callback_query(F.data == "renew_payment")
+async def cb_renew_payment(c: CallbackQuery):
+    """Qayta to'lov qilish - mavjud userlar uchun."""
+    try:
+        # User'ni to'lov kutish rejimiga qo'shish
+        WAIT_PAYMENT_PHOTO.add(c.from_user.id)
+        
+        # To'lov ma'lumotlarini olish
+        payment_settings = await get_payment_settings()
+        
+        if payment_settings:
+            bank = payment_settings['bank_name']
+            card = payment_settings['card_number']
+            amount = payment_settings['amount']
+            additional = payment_settings.get('additional_info', '')
+            
+            payment_info = (
+                f"💳 <b>To'lov ma'lumoti:</b>\n\n"
+                f"🏦 Bank: {bank}\n"
+                f"💰 Summa: {amount}\n"
+                f"📋 Karta: <code>{card}</code>\n"
+            )
+            
+            if additional:
+                payment_info += f"\n📝 {additional}\n"
+        else:
+            payment_info = (
+                "💳 <b>To'lov ma'lumoti:</b>\n\n"
+                "📸 To'lov chekini yuboring.\n"
+            )
+        
+        await c.message.answer(
+            f"{payment_info}\n\n"
+            "📸 <b>To'lov chekini yuklang:</b>\n\n"
+            "To'lov qilganingizdan so'ng chekni surat qilib yuboring.\n"
+            "Admin tekshirib, tasdiqlaydi.",
+            parse_mode="HTML"
+        )
+        
+        await c.answer("✅ To'lov chekini yuboring")
+        logger.info(f"User {c.from_user.id} started renewal payment process")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_renew_payment: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("course:"))
 async def cb_course_select(c: CallbackQuery):
