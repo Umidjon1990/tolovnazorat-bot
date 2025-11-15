@@ -4629,6 +4629,49 @@ async def cb_group_delete_cancel(c: CallbackQuery):
 
 _WARNED_CACHE: dict[tuple[int, int, str], int] = {}
 
+async def handle_missing_chat(group_id: int, reason: str = "chat not found"):
+    """Agar guruh topilmasa, database'dan avtomatik o'chirish."""
+    try:
+        logger.error(f"Group {group_id} not found in Telegram ({reason}) - removing from database")
+        
+        # Guruh nomini olish (log uchun)
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT name FROM groups WHERE group_id = $1", group_id)
+            group_name = row['name'] if row else str(group_id)
+            
+            # Database'dan o'chirish
+            await conn.execute("DELETE FROM groups WHERE group_id = $1", group_id)
+            await conn.execute("DELETE FROM user_groups WHERE group_id = $1", group_id)
+        
+        # Global o'zgaruvchilardan o'chirish
+        global GROUP_IDS
+        if group_id in GROUP_IDS:
+            GROUP_IDS.remove(group_id)
+        
+        # Cache'larni tozalash
+        keys_to_remove = [k for k in _WARNED_CACHE.keys() if k[1] == group_id]
+        for k in keys_to_remove:
+            del _WARNED_CACHE[k]
+        
+        logger.info(f"Successfully removed invalid group {group_id} ({group_name}) from database")
+        
+        # Super adminlarga xabar yuborish
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"⚠️ <b>Guruh avtomatik o'chirildi</b>\n\n"
+                    f"📋 Nom: {group_name}\n"
+                    f"🆔 ID: <code>{group_id}</code>\n"
+                    f"❌ Sabab: {reason}\n\n"
+                    f"Bot guruhga kirib bo'lmadi yoki guruh o'chirilgan.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Error in handle_missing_chat for group {group_id}: {e}")
+
 async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
     now_ts = int(datetime.utcnow().timestamp())
     key = (uid, gid or 0, reason)
@@ -4649,7 +4692,12 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
             logger.info(f"User {uid} is admin/creator in group {gid}, skipping warning")
             return
     except Exception as e:
-        # User guruhda yo'q yoki xatolik - eslatma yubormaymiz
+        error_msg = str(e)
+        # Agar guruh topilmasa, database'dan avtomatik o'chirish
+        if "chat not found" in error_msg.lower() or "chat_not_found" in error_msg.lower():
+            await handle_missing_chat(gid, error_msg)
+            return
+        # Boshqa xatoliklar uchun - eslatma yubormaymiz
         logger.warning(f"Failed to check membership for user {uid} in group {gid}: {e}")
         return
     
@@ -5025,10 +5073,24 @@ async def cb_warn_kick(c: CallbackQuery):
                     logger.error(f"Bot does not have restrict_members permission in group {gid}")
                     return await c.answer("Bot'da huquq yetarli emas!", show_alert=True)
             except Exception as e:
-                logger.error(f"Could not check bot permissions in group {gid}: {e}")
+                error_msg = str(e)
+                logger.error(f"Could not check bot permissions in group {gid}: {error_msg}")
+                
+                # Agar guruh topilmasa, database'dan avtomatik o'chirish
+                if "chat not found" in error_msg.lower() or "chat_not_found" in error_msg.lower():
+                    await handle_missing_chat(gid, error_msg)
+                    await c.message.answer(
+                        f"⚠️ <b>Guruh o'chirildi</b>\n\n"
+                        f"📋 Guruh: {group_name}\n"
+                        f"🆔 ID: <code>{gid}</code>\n\n"
+                        f"❌ Guruh Telegram'da topilmadi va database'dan avtomatik o'chirildi.",
+                        parse_mode="HTML"
+                    )
+                    return await c.answer("Guruh o'chirildi", show_alert=True)
+                
                 await c.message.answer(
                     f"❌ <b>Xatolik!</b>\n\n"
-                    f"Guruh holatini tekshirib bo'lmadi: {e}\n\n"
+                    f"Guruh holatini tekshirib bo'lmadi: {error_msg}\n\n"
                     f"Bot guruhda admin ekanligini va <b>\"Foydalanuvchilarni cheklash\"</b> huquqi borligini tekshiring.",
                     parse_mode="HTML"
                 )
