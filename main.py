@@ -4421,6 +4421,169 @@ async def cb_reject(c: CallbackQuery):
         logger.error(f"Error in cb_reject: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
+@dp.callback_query(F.data.startswith("group_info:"))
+async def cb_group_info(c: CallbackQuery):
+    """Guruh/kanal ma'lumotlarini ko'rsatish."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        gid = int(c.data.split(":")[1])
+        
+        # Guruh ma'lumotlarini olish
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT group_id, name, type, created_at 
+                FROM groups 
+                WHERE group_id = $1
+            """, gid)
+            
+            if not row:
+                return await c.answer("Guruh topilmadi", show_alert=True)
+            
+            # Guruh statistikasini hisoblash
+            user_count = await conn.fetchval("""
+                SELECT COUNT(DISTINCT user_id) 
+                FROM user_groups 
+                WHERE group_id = $1
+            """, gid)
+            
+            active_count = await conn.fetchval("""
+                SELECT COUNT(DISTINCT user_id) 
+                FROM user_groups 
+                WHERE group_id = $1 AND expires_at > $2
+            """, gid, int(datetime.utcnow().timestamp()))
+        
+        # Guruh turini aniqlash
+        gtype = row['type']
+        type_emoji = "📢" if gtype == "channel" else "👥"
+        type_name = "Kanal" if gtype == "channel" else "Guruh"
+        
+        # Yaratilgan sanani formatlash
+        created_date = (datetime.utcfromtimestamp(row['created_at']) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M")
+        
+        info_text = (
+            f"{type_emoji} <b>{row['name']}</b>\n\n"
+            f"🆔 ID: <code>{gid}</code>\n"
+            f"📊 Tur: {type_name}\n"
+            f"📅 Qo'shildi: {created_date}\n\n"
+            f"👥 Jami o'quvchilar: {user_count}\n"
+            f"✅ Faol obunalar: {active_count}\n"
+            f"❌ Tugagan: {user_count - active_count}"
+        )
+        
+        await c.answer()
+        await c.message.answer(info_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error in cb_group_info: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("group_delete:"))
+async def cb_group_delete(c: CallbackQuery):
+    """Guruh/kanalni o'chirish (tasdiqlash bilan)."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        gid = int(c.data.split(":")[1])
+        
+        # Guruh ma'lumotlarini olish
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT group_id, name, type 
+                FROM groups 
+                WHERE group_id = $1
+            """, gid)
+            
+            if not row:
+                return await c.answer("Guruh topilmadi", show_alert=True)
+            
+            # Foydalanuvchilar sonini hisoblash
+            user_count = await conn.fetchval("""
+                SELECT COUNT(DISTINCT user_id) 
+                FROM user_groups 
+                WHERE group_id = $1
+            """, gid)
+        
+        # Tasdiqlash tugmalari
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"group_delete_confirm:{gid}"),
+                InlineKeyboardButton(text="❌ Bekor qilish", callback_data="group_delete_cancel")
+            ]
+        ])
+        
+        gtype = row['type']
+        type_name = "kanalni" if gtype == "channel" else "guruhni"
+        
+        await c.message.edit_text(
+            f"⚠️ <b>Ogohlantirish!</b>\n\n"
+            f"Siz <b>{row['name']}</b> {type_name} o'chirmoqchisiz.\n\n"
+            f"👥 Bu guruhda {user_count} ta o'quvchi bor.\n\n"
+            f"🗑 O'chirilgandan keyin:\n"
+            f"• Guruh ro'yxatdan olib tashlanadi\n"
+            f"• O'quvchilar ma'lumotlari saqlanadi\n"
+            f"• Yangi to'lovlar qabul qilinmaydi\n\n"
+            f"Davom etasizmi?",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        await c.answer()
+    except Exception as e:
+        logger.error(f"Error in cb_group_delete: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("group_delete_confirm:"))
+async def cb_group_delete_confirm(c: CallbackQuery):
+    """Guruh o'chirishni tasdiqlash."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        gid = int(c.data.split(":")[1])
+        
+        # Guruh nomini olish
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT name FROM groups WHERE group_id = $1", gid)
+            if not row:
+                return await c.answer("Guruh topilmadi", show_alert=True)
+            
+            group_name = row['name']
+            
+            # Guruhni o'chirish
+            await conn.execute("DELETE FROM groups WHERE group_id = $1", gid)
+            
+            # Admin_groups jadvalidan ham o'chirish
+            await conn.execute("DELETE FROM admin_groups WHERE group_id = $1", gid)
+        
+        # GROUP_IDS global o'zgaruvchisidan ham o'chirish
+        global GROUP_IDS
+        if gid in GROUP_IDS:
+            GROUP_IDS.remove(gid)
+        
+        await c.message.edit_text(
+            f"✅ <b>Guruh o'chirildi!</b>\n\n"
+            f"📋 Nom: {group_name}\n"
+            f"🆔 ID: <code>{gid}</code>\n\n"
+            f"Guruh muvaffaqiyatli o'chirildi.",
+            parse_mode="HTML"
+        )
+        await c.answer("✅ Guruh o'chirildi")
+        
+        logger.info(f"Group {gid} ({group_name}) deleted by admin {c.from_user.id}")
+    except Exception as e:
+        logger.error(f"Error in cb_group_delete_confirm: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data == "group_delete_cancel")
+async def cb_group_delete_cancel(c: CallbackQuery):
+    """Guruh o'chirishni bekor qilish."""
+    await c.message.edit_text(
+        "❌ Guruh o'chirish bekor qilindi.",
+        parse_mode="HTML"
+    )
+    await c.answer("Bekor qilindi")
+
 _WARNED_CACHE: dict[tuple[int, int, str], int] = {}
 
 async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
