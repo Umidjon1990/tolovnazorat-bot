@@ -42,7 +42,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Approach**: Hybrid - critical secrets in environment variables, dynamic data in database.
 - **Environment Variables** (immutable): `BOT_TOKEN`, `DATABASE_URL`, `ADMIN_IDS`.
 - **Database-Driven** (dynamic): Groups management via `groups` table - no Railway dashboard access needed.
-- **Legacy Support**: `PRIVATE_GROUP_ID` auto-migrates to database on first startup.
+- **Auto-Sync on Startup**: `PRIVATE_GROUP_ID` automatically syncs to database on every restart (not just first startup) - new groups from environment variable are automatically added to database without removing existing ones.
 - **Other Settings**: `SUBSCRIPTION_DAYS`, `INVITE_LINK_EXPIRE_HOURS`, `REMIND_DAYS` (environment variables).
 - **Multi-Tenant Ready**: Admins can add/remove groups via bot commands without code changes or redeployment.
 
@@ -123,6 +123,16 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **State Management**: `WAIT_FULLNAME_FOR`, `WAIT_CONTACT_FOR`, `WAIT_PAYMENT_PHOTO`, `WAIT_DATE_FOR` sets to manage multi-step workflows
 - **Admin Approval**: Callbacks (`ap_now`, `ap_date`, `reject`) with group selection and invite link generation
 - **Profile Name & Chat Link Fix**: Uses `fetch_user_profile()` from Telegram API for fresh user names in all payment-related messages, ensuring consistency
+- **Smart Group Name Resolution**: 
+  - Priority: Database names > Telegram API > Group ID fallback
+  - Auto-updates database with real group names from Telegram API when default "Guruh #N" names are encountered
+  - Ensures admin panel shows readable group names instead of IDs
+  - Single database query for performance, with automatic name caching
+- **Unauthorized Join Protection**: 
+  - Automatically removes users who join group without approved payment (edge case: manual admin add)
+  - Uses ban + unban pattern for clean removal
+  - Sends clear instructions to removed users on proper registration process
+  - Prevents unauthorized group access while maintaining payment-first workflow integrity
 - **Telegram Mini App (Legacy Workflow)**: React frontend (Vite) and FastAPI backend for user registration, course selection, payment submission, and admin operations. Features Telegram `initData` verification for authentication
 
 # Deployment Architecture
