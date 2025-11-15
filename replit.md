@@ -36,6 +36,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - `contract_templates` (editable contract text with history)
   - **`groups`** (database-driven group management for multi-tenant support)
   - **`admins`** (multi-tenant admin management: user_id, role, active, expires_at, managed_groups)
+  - **`payment_settings`** (dynamic payment info: bank_name, card_number, amount, additional_info)
 
 ## Configuration Management
 - **Approach**: Hybrid - critical secrets in environment variables, dynamic data in database.
@@ -90,22 +91,29 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
     - `/unregistered` - Show users in group without active subscription
   - **Contract Management**:
     - `/edit_contract` - Update contract template (text or file)
+  - **Payment Info Management**:
+    - `/edit_payment` - Update payment info (bank, card, amount) dynamically
   - Payment approval and subscription management via inline buttons
-- **Automation**: Auto-kick loop, subscription expiry warnings with action buttons, admin expiry auto-deactivation (runs every 60 seconds).
+- **Automation**: 
+  - Auto-kick loop with membership validation (skips users not in group, skips admins/creators)
+  - Subscription expiry warnings with action buttons (only to active group members)
+  - Admin expiry auto-deactivation (runs every 60 seconds)
+  - Smart warning system: checks group membership before sending, filters admins by group access
 
 ## UI/UX Decisions
 - **Admin Panel**: Persistent reply keyboard with role-based buttons:
-  - **Super Admin**: Statistika, Guruh o'quvchilari, To'lovlar, Guruh qo'shish, Adminlar, Shartnoma tahrirlash, Tozalash
-  - **Regular Admin**: Statistika, Guruh o'quvchilari, To'lovlar, Shartnoma tahrirlash, Tozalash
+  - **Super Admin**: Statistika, Guruh o'quvchilari, To'lovlar, Guruh qo'shish, Adminlar, Shartnoma tahrirlash, To'lov ma'lumoti, Tozalash
+  - **Regular Admin**: Statistika, Guruh o'quvchilari, To'lovlar, Shartnoma tahrirlash, To'lov ma'lumoti, Tozalash
 - **Message Cleanup**: Automatic deletion of bot messages in admin chats after actions like payment approval to maintain cleanliness.
 - **Smart Chat Links**: User messages use `[username](tg://user?id=...)` for clickable profiles.
 
 ## Technical Implementations
 - **Payment-First Registration Flow**:
   - Users register via `/start` without group membership requirement
-  - Phone number collection triggers `PAYMENT_INFO` display (bank card details from environment)
+  - Phone number collection triggers payment info display (bank card details from `payment_settings` database table)
   - Photo handler captures receipt and stores in `payments` table with `status='pending'`
   - Admin receives notification with payment details and approval buttons
+- **Dynamic Payment Settings**: Admin can edit payment info via `/edit_payment` command, stored in database for instant updates
 - **24-Hour Invite Links**: `send_one_time_link()` generates time-limited links with `member_limit=1` and `expire_date=24h`
 - **Auto-Subscription on Join**: `ChatMemberUpdated` handler detects group join and starts 30-day subscription automatically
 - **Group-Level Security**: Admin payment views filtered by assigned groups - regular admins only see their groups, super admins see all
