@@ -306,28 +306,27 @@ async def db_init():
                 """, CONTRACT_TEXT, now, now)
                 logger.info("Default contract template inserted")
             
-            # Migration: Environment variable'dan database'ga guruhlarni ko'chirish
-            groups_count = await conn.fetchval("SELECT COUNT(*) FROM groups")
-            if groups_count == 0 and GROUP_IDS:
-                # Eski PRIVATE_GROUP_ID'dan allaqachon parselangan GROUP_IDS'ni database'ga ko'chirish
-                # Bu vergul bilan ajratilgan ko'p guruhlarni ham qo'llab-quvvatlaydi
+            # Auto-sync: Environment variable'dan yangi guruhlarni database'ga qo'shish
+            # Database bo'sh bo'lmaganida ham yangi guruhlar qo'shiladi (faqat yangilari)
+            if GROUP_IDS:
                 now = int(datetime.utcnow().timestamp())
-                migrated_count = 0
+                synced_count = 0
                 for idx, gid in enumerate(GROUP_IDS, start=1):
                     try:
-                        # Har bir guruhni database'ga qo'shish
+                        # Har bir guruhni database'ga qo'shish (agar yo'q bo'lsa)
+                        # ON CONFLICT DO NOTHING - mavjud guruhlarni o'zgartirmaydi
                         name = f"Guruh #{idx}" if len(GROUP_IDS) > 1 else "Asosiy guruh"
-                        await conn.execute("""
+                        result = await conn.execute("""
                             INSERT INTO groups(group_id, name, created_at)
                             VALUES($1, $2, $3)
                             ON CONFLICT(group_id) DO NOTHING
                         """, gid, name, now)
-                        migrated_count += 1
+                        synced_count += 1
                     except Exception as e:
-                        logger.error(f"Failed to migrate group {gid}: {e}")
+                        logger.error(f"Failed to sync group {gid}: {e}")
                 
-                if migrated_count > 0:
-                    logger.info(f"Migrated {migrated_count} group(s) from PRIVATE_GROUP_ID to database")
+                if synced_count > 0:
+                    logger.info(f"Auto-synced {synced_count} group(s) from PRIVATE_GROUP_ID to database (new groups only)")
             
             # GROUP_IDS ni database'dan yuklash
             db_groups = await load_groups_from_db()
@@ -611,18 +610,39 @@ def contact_keyboard() -> ReplyKeyboardMarkup:
 async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tuple[int, str]]:
     """Guruh ID'larini nomlariga aylantirish.
     
+    Priority: Database names > Telegram API > Group ID
+    
     Args:
         group_ids: Agar berilsa, faqat shu guruhlar. Aks holda, barcha GROUP_IDS.
     """
     ids_to_resolve = group_ids if group_ids is not None else GROUP_IDS
+    
+    # 1. Database'dan barcha guruh nomlarini olish
+    db_titles = {}
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch("SELECT group_id, name FROM groups")
+            for row in rows:
+                if row['name'] and row['name'].strip():
+                    db_titles[row['group_id']] = row['name']
+    except Exception as e:
+        logger.warning(f"Failed to fetch group names from database: {e}")
+    
+    # 2. Har bir guruh uchun nom aniqlash
     result = []
     for gid in ids_to_resolve:
-        try:
-            chat = await bot.get_chat(gid)
-            title = chat.title or str(gid)
-        except Exception as e:
-            logger.warning(f"Failed to get title for group {gid}: {e}")
-            title = str(gid)
+        # Avval database'dan nom olish
+        if gid in db_titles:
+            title = db_titles[gid]
+        else:
+            # Database'da nom yo'q bo'lsa, Telegram API'dan olish (fallback)
+            try:
+                chat = await bot.get_chat(gid)
+                title = chat.title or str(gid)
+            except Exception as e:
+                logger.warning(f"Failed to get title for group {gid}: {e}")
+                title = str(gid)
+        
         result.append((gid, title))
     return result
 
