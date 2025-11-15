@@ -4332,6 +4332,24 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
     last = _WARNED_CACHE.get(key, 0)
     if now_ts - last < 3600:
         return
+    
+    # 1. User guruhda hozir borligini tekshirish
+    try:
+        member = await bot.get_chat_member(gid, uid)
+        if member.status not in ("member", "administrator", "creator"):
+            # User guruhda emas - eslatma yubormaymiz
+            logger.info(f"User {uid} is not in group {gid} (status: {member.status}), skipping warning")
+            return
+        
+        # 2. User admin yoki creator bo'lsa, eslatma yubormaymiz
+        if member.status in ("administrator", "creator"):
+            logger.info(f"User {uid} is admin/creator in group {gid}, skipping warning")
+            return
+    except Exception as e:
+        # User guruhda yo'q yoki xatolik - eslatma yubormaymiz
+        logger.warning(f"Failed to check membership for user {uid} in group {gid}: {e}")
+        return
+    
     _WARNED_CACHE[key] = now_ts
     row = await get_user(uid)
     _username = ""
@@ -4362,11 +4380,23 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
     admin_title = "⏰ *Obuna yaqin orada tugaydi*" if reason == "soon" else "⚠️ *Obuna muddati tugagan a'zo*"
     msg = (f"{admin_title}\n" f"• Foydalanuvchi: {tag}\n" f"• ID: `{uid}`\n" f"• Guruh: {gtitle} (`{gid}`)\n" f"• Tugash: {exp_str}\n\n" "Amalni tanlang:")
     kb = warn_keyboard(uid, gid)
-    for aid in ADMIN_IDS:
-        try:
-            await bot.send_message(aid, msg, reply_markup=kb, parse_mode="Markdown")
-        except Exception as e:
-            logger.warning(f"Failed to send warning to admin {aid}: {e}")
+    
+    # 3. Faqat bu guruhga access bo'lgan adminlarga yuborish
+    async with db_pool.acquire() as conn:
+        admin_list = await conn.fetch("""
+            SELECT DISTINCT a.user_id 
+            FROM admins a
+            LEFT JOIN admin_groups ag ON a.user_id = ag.admin_id
+            WHERE a.active = TRUE
+              AND (a.role = 'super_admin' OR ag.group_id = $1)
+        """, gid)
+        
+        for admin_row in admin_list:
+            aid = admin_row['user_id']
+            try:
+                await bot.send_message(aid, msg, reply_markup=kb, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"Failed to send warning to admin {aid}: {e}")
 
 async def send_expiry_warnings():
     """2 kun ichida muddati tugaydigan adminlarga eslatma yuborish"""
@@ -4575,27 +4605,67 @@ async def cb_warn_notpaid(c: CallbackQuery):
         NOT_PAID_COUNTER[key] = count
         
         if count >= 3:
+            # User guruhda borligini va admin emasligini tekshirish
             try:
                 member = await bot.get_chat_member(gid, uid)
+                
+                # Admin yoki creator bo'lsa, chiqarib bo'lmaydi
                 if member.status in ("administrator", "creator"):
                     await c.message.answer("❗ Bu foydalanuvchi guruhda admin/egadir. Chiqarib bo'lmaydi.")
                     return await c.answer()
-            except Exception:
-                pass
+                
+                # User guruhda emas bo'lsa, skip qilamiz
+                if member.status not in ("member", "administrator", "creator"):
+                    await c.message.answer(f"ℹ️ Foydalanuvchi {uid} guruhda emas. Chiqarish kerak emas.")
+                    NOT_PAID_COUNTER.pop(key, None)
+                    return await c.answer("Guruhda emas")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to get member status for {uid} in {gid}: {e}")
+                await c.message.answer(f"⚠️ Foydalanuvchi holati tekshirilmadi: {e}")
+                return await c.answer("Xatolik", show_alert=True)
+            
+            # Kick qilish
             try:
-                await bot.ban_chat_member(gid, uid)
-                await bot.unban_chat_member(gid, uid)
+                # Ban qilib, keyin unban qilish = kick
+                await bot.ban_chat_member(chat_id=gid, user_id=uid)
+                await asyncio.sleep(0.5)  # Biroz kutamiz
+                await bot.unban_chat_member(chat_id=gid, user_id=uid)
+                
+                # Database'dan tozalash
                 await clear_user_group(uid, gid)
                 await clear_user_group_extra(uid, gid)
                 NOT_PAID_COUNTER.pop(key, None)
-                await c.message.answer(f"❌ {uid} 3 marta to'lov qilmagan. Guruhdan chiqarildi.")
+                
+                await c.message.answer(f"✅ Foydalanuvchi {uid} guruhdan chiqarildi (3 marta to'lov qilmagan).")
+                logger.info(f"User {uid} kicked from group {gid} by admin {c.from_user.id}")
+                
+                # Userga xabar yuborish
                 try:
                     await bot.send_message(uid, "❌ 3 marta to'lov qilmaganingiz sababli guruhdan chiqarildingiz.")
                 except Exception as e:
                     logger.warning(f"Failed to notify kicked user {uid}: {e}")
+                
+                await c.answer("✅ Guruhdan chiqarildi")
+                
             except Exception as e:
-                await c.message.answer(f"Chiqarishda xato: {e}")
-            await c.answer("Guruhdan chiqarildi")
+                error_msg = str(e)
+                logger.error(f"Error kicking user {uid} from group {gid}: {error_msg}")
+                
+                # Xatolik turini aniqlash
+                if "not enough rights" in error_msg.lower():
+                    await c.message.answer(
+                        f"❌ <b>Xatolik!</b>\n\n"
+                        f"Bot'da guruhda a'zolarni chiqarish huquqi yo'q.\n\n"
+                        f"Guruh sozlamalarida bot'ga 'Foydalanuvchilarni ban qilish' huquqini bering.",
+                        parse_mode="HTML"
+                    )
+                elif "user not found" in error_msg.lower():
+                    await c.message.answer("ℹ️ Foydalanuvchi guruhda topilmadi.")
+                else:
+                    await c.message.answer(f"❌ Chiqarishda xatolik: {error_msg}")
+                
+                await c.answer("❌ Xatolik yuz berdi", show_alert=True)
         else:
             await c.message.answer(f"⌛ Foydalanuvchi {uid} hali to'lov qilmagan deb qayd etildi. ({count}/3)")
             await c.answer(f"Qayd etildi ({count}/3)")
