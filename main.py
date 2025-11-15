@@ -1057,6 +1057,27 @@ async def cmd_start(m: Message):
                 
                 lines.append("\n🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!")
                 
+                # To'lov yo'riqnomasini qo'shish
+                lines.append("\n" + "─" * 30)
+                lines.append("\n💳 <b>Yangi to'lov qilish:</b>")
+                
+                # To'lov ma'lumotlarini olish
+                try:
+                    payment_settings = await get_payment_settings()
+                    if payment_settings:
+                        bank = payment_settings['bank_name']
+                        card = payment_settings['card_number']
+                        amount = payment_settings['amount']
+                        
+                        lines.append(f"\n🏦 Bank: {bank}")
+                        lines.append(f"💰 Summa: {amount}")
+                        lines.append(f"💳 Karta: <code>{card}</code>")
+                        lines.append("\n📸 To'lovni amalga oshiring va chek rasmini shu botga yuboring.")
+                    else:
+                        lines.append("\n📸 To'lov chekini shu botga yuboring.")
+                except Exception:
+                    lines.append("\n📸 To'lov chekini shu botga yuboring.")
+                
                 await m.answer("\n".join(lines), parse_mode="HTML")
                 logger.info(f"User {m.from_user.id} has {len(active_subscriptions)} active subscription(s)")
                 return
