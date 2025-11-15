@@ -1395,13 +1395,39 @@ async def cmd_add_group(m: Message):
             await add_group_to_db(group_id, actual_name, chat_type)
             
         except Exception as e:
+            error_msg = str(e).lower()
             logger.warning(f"Failed to get chat info for {group_id}: {e}")
-            # Agar API chaqiruvi muvaffaqiyatsiz bo'lsa, default qiymat bilan qo'shish
-            actual_name = name or "Nomsiz"
-            chat_type = "group"
-            type_emoji = "❓"
-            type_name = "Noma'lum"
-            await add_group_to_db(group_id, actual_name, chat_type)
+            
+            # Aniq xatolik xabarlari
+            if "chat not found" in error_msg or "chat_not_found" in error_msg:
+                return await m.answer(
+                    f"❌ <b>Guruh topilmadi!</b>\n\n"
+                    f"🆔 ID: <code>{group_id}</code>\n\n"
+                    f"💡 <b>Sabablari:</b>\n"
+                    f"• Guruh ID noto'g'ri\n"
+                    f"• Bot guruhda admin emas\n"
+                    f"• Bot guruhda umuman yo'q\n\n"
+                    f"✅ <b>Yechim:</b>\n"
+                    f"1. Botni guruhga qo'shing\n"
+                    f"2. Bot'ni admin qiling\n"
+                    f"3. Qayta urinib ko'ring",
+                    parse_mode="HTML"
+                )
+            elif "forbidden" in error_msg or "not enough rights" in error_msg:
+                return await m.answer(
+                    f"❌ <b>Bot'da huquq yo'q!</b>\n\n"
+                    f"🆔 ID: <code>{group_id}</code>\n\n"
+                    f"✅ <b>Yechim:</b>\n"
+                    f"Bot'ni guruhda <b>admin</b> qiling va qayta urinib ko'ring.",
+                    parse_mode="HTML"
+                )
+            else:
+                # Boshqa xatoliklar uchun - default qiymat bilan qo'shish
+                actual_name = name or "Nomsiz"
+                chat_type = "group"
+                type_emoji = "❓"
+                type_name = "Noma'lum"
+                await add_group_to_db(group_id, actual_name, chat_type)
         
         # GROUP_IDS ni yangilash
         GROUP_IDS = await load_groups_from_db()
