@@ -287,6 +287,15 @@ async def db_init():
             except Exception as me:
                 logger.warning(f"Migration warning: {me}")
             
+            # Migration: groups jadvaliga 'type' ustuni qo'shish (group/channel farqlash uchun)
+            try:
+                await conn.execute("""
+                    ALTER TABLE groups ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'group';
+                """)
+                logger.info("Migration: groups.type column added/verified")
+            except Exception as me:
+                logger.warning(f"Migration warning: {me}")
+            
             # Default shartnoma matnini qo'shish (agar yo'q bo'lsa)
             count = await conn.fetchval("SELECT COUNT(*) FROM contract_templates")
             if count == 0:
@@ -428,15 +437,15 @@ async def load_groups_from_db() -> list[int]:
         rows = await conn.fetch("SELECT group_id FROM groups ORDER BY id")
         return [row['group_id'] for row in rows]
 
-async def add_group_to_db(group_id: int, name: Optional[str] = None):
-    """Yangi guruh qo'shish."""
+async def add_group_to_db(group_id: int, name: Optional[str] = None, chat_type: str = 'group'):
+    """Yangi guruh yoki kanal qo'shish."""
     now = int(datetime.utcnow().timestamp())
     async with db_pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO groups(group_id, name, created_at)
-            VALUES($1, $2, $3)
-            ON CONFLICT(group_id) DO UPDATE SET name=EXCLUDED.name
-        """, group_id, name, now)
+            INSERT INTO groups(group_id, name, created_at, type)
+            VALUES($1, $2, $3, $4)
+            ON CONFLICT(group_id) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type
+        """, group_id, name, now, chat_type)
 
 async def remove_group_from_db(group_id: int):
     """Guruhni o'chirish."""
@@ -617,24 +626,46 @@ async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tu
         result.append((gid, title))
     return result
 
+async def get_group_type(group_id: int) -> str:
+    """Guruh yoki kanal turini database'dan olish."""
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT type FROM groups WHERE group_id=$1", group_id)
+            return row['type'] if row else 'group'
+    except Exception:
+        return 'group'  # Default
+
 async def send_one_time_link(group_id: int, user_id: int) -> str:
-    """24 soatlik bir martalik invite link yaratish.
+    """24 soatlik invite link yaratish (guruh/kanal uchun).
     
     Args:
-        group_id: Guruh ID
+        group_id: Guruh/Kanal ID
         user_id: User ID (link nomi uchun)
     
     Returns:
-        24 soat amal qiladigan bir martalik invite link
+        24 soat amal qiladigan invite link
     """
     expire_date = datetime.utcnow() + timedelta(hours=24)
-    link = await bot.create_chat_invite_link(
-        chat_id=group_id,
-        name=f"sub-{user_id}",
-        member_limit=1,  # Faqat 1 kishi kirishi mumkin (bir martalik)
-        expire_date=expire_date,  # 24 soatdan keyin amal qilmaydi
-        creates_join_request=False  # Avtomatik kirish, approval yo'q
-    )
+    group_type = await get_group_type(group_id)
+    
+    if group_type == 'channel':
+        # Kanal uchun: member_limit ishlamaydi, faqat expire_date
+        link = await bot.create_chat_invite_link(
+            chat_id=group_id,
+            name=f"sub-{user_id}",
+            expire_date=expire_date,  # 24 soatdan keyin amal qilmaydi
+            creates_join_request=False  # Avtomatik kirish, approval yo'q
+        )
+    else:
+        # Guruh uchun: member_limit=1 (bir martalik)
+        link = await bot.create_chat_invite_link(
+            chat_id=group_id,
+            name=f"sub-{user_id}",
+            member_limit=1,  # Faqat 1 kishi kirishi mumkin (bir martalik)
+            expire_date=expire_date,  # 24 soatdan keyin amal qilmaydi
+            creates_join_request=False  # Avtomatik kirish, approval yo'q
+        )
+    
     return link.invite_link
 
 def is_admin(uid: int) -> bool:
@@ -834,13 +865,13 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Guruhga yangi a'zo qo'shilganda subscription boshlanadi
 @dp.chat_member()
 async def on_chat_member_updated(event: ChatMemberUpdated):
-    """Guruhga yangi odam qo'shilganda 30 kunlik subscription boshlanadi (payment-first workflow)."""
+    """Guruh/kanalga yangi odam qo'shilganda yoki obuna bo'lganda 30 kunlik subscription boshlanadi (payment-first workflow)."""
     try:
-        # Faqat guruhlar uchun
-        if event.chat.type not in ("group", "supergroup"):
+        # Faqat guruhlar va kanallar uchun
+        if event.chat.type not in ("group", "supergroup", "channel"):
             return
         
-        # Faqat yangi a'zolar uchun (member bo'lmagandan member bo'lganda)
+        # Faqat yangi a'zolar/obunachilar uchun (member bo'lmagandan member bo'lganda)
         if event.new_chat_member.status == "member" and event.old_chat_member.status not in ("member", "administrator", "creator"):
             user = event.new_chat_member.user
             
@@ -876,24 +907,35 @@ async def on_chat_member_updated(event: ChatMemberUpdated):
                 await upsert_user(user.id, username, full_name, event.chat.id, expires_at, phone)
                 await add_user_group(user.id, event.chat.id, expires_at)
                 
-                # User'ga xabar yuborish
+                # User'ga xabar yuborish (guruh/kanal farqi bilan)
                 expiry_date = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+                
+                # Chat turini aniqlash
+                if event.chat.type == "channel":
+                    join_text = "kanalga obuna bo'ldingiz"
+                    emoji = "📢"
+                    type_name = "Kanal"
+                else:
+                    join_text = "guruhga qo'shildingiz"
+                    emoji = "👥"
+                    type_name = "Guruh"
+                
                 try:
                     await bot.send_message(
                         chat_id=user.id,
                         text=(
                             f"🎉 *Tabriklayman!*\n\n"
-                            f"✅ Siz guruhga qo'shildingiz va obuna boshlanadi!\n\n"
+                            f"✅ Siz {join_text} va obuna boshlanadi!\n\n"
                             f"📅 Obuna tugashi: {expiry_date}\n"
                             f"⏰ Muddat: {SUBSCRIPTION_DAYS} kun\n\n"
-                            f"📚 Guruh: {event.chat.title or 'Guruh'}"
+                            f"{emoji} {type_name}: {event.chat.title or type_name}"
                         ),
                         parse_mode="Markdown"
                     )
                 except Exception as e:
                     logger.warning(f"Failed to send subscription start message to user {user.id}: {e}")
                 
-                logger.info(f"Subscription started for user {user.id} in group {event.chat.id} - expires at {expiry_date}")
+                logger.info(f"Subscription started for user {user.id} in {event.chat.type} {event.chat.id} - expires at {expiry_date}")
             else:
                 # Agar payment yo'q yoki pending bo'lsa - welcome message yuborish
                 user_mention = f"[{user.first_name}](tg://user?id={user.id})"
@@ -1176,7 +1218,7 @@ async def cmd_groups(m: Message):
 
 @dp.message(Command("add_group"))
 async def cmd_add_group(m: Message):
-    """Yangi guruh qo'shish (faqat super admin)."""
+    """Yangi guruh yoki kanal qo'shish (faqat super admin)."""
     global GROUP_IDS
     
     if not is_super_admin(m.from_user.id):
@@ -1186,44 +1228,65 @@ async def cmd_add_group(m: Message):
         parts = (m.text or "").split(maxsplit=2)
         if len(parts) < 2:
             return await m.answer(
-                "❌ Noto'g'ri format!\n\n"
-                "To'g'ri format:\n"
-                "<code>/add_group -1001234567890 [Guruh nomi]</code>\n\n"
-                "Misol:\n"
-                "<code>/add_group -1001234567890 Python kursi</code>",
+                "❌ <b>Noto'g'ri format!</b>\n\n"
+                "📋 <b>To'g'ri format:</b>\n"
+                "<code>/add_group -1001234567890 [Nom]</code>\n\n"
+                "📌 <b>Misol:</b>\n"
+                "• <code>/add_group -1002950957206 Python kursi</code> (Guruh)\n"
+                "• <code>/add_group -1003047829296 E'lonlar kanali</code> (Kanal)\n\n"
+                "💡 <b>Izoh:</b> Guruh ham, kanal ham qo'shishingiz mumkin!",
                 parse_mode="HTML"
             )
         
         group_id = int(parts[1])
         name = parts[2] if len(parts) > 2 else None
         
-        # Guruhni database'ga qo'shish
-        await add_group_to_db(group_id, name)
+        # Guruh yoki kanal turini aniqlash (Telegram API orqali)
+        try:
+            chat = await bot.get_chat(group_id)
+            actual_name = chat.title or name or "Nomsiz"
+            
+            # Chat turini aniqlash
+            if chat.type == "channel":
+                chat_type = "channel"
+                type_emoji = "📢"
+                type_name = "Kanal"
+            elif chat.type in ("group", "supergroup"):
+                chat_type = "group"
+                type_emoji = "👥"
+                type_name = "Guruh"
+            else:
+                chat_type = "group"  # Default
+                type_emoji = "❓"
+                type_name = "Noma'lum"
+            
+            # Database'ga qo'shish
+            await add_group_to_db(group_id, actual_name, chat_type)
+            
+        except Exception as e:
+            logger.warning(f"Failed to get chat info for {group_id}: {e}")
+            # Agar API chaqiruvi muvaffaqiyatsiz bo'lsa, default qiymat bilan qo'shish
+            actual_name = name or "Nomsiz"
+            chat_type = "group"
+            type_emoji = "❓"
+            type_name = "Noma'lum"
+            await add_group_to_db(group_id, actual_name, chat_type)
         
         # GROUP_IDS ni yangilash
         GROUP_IDS = await load_groups_from_db()
         
-        # Guruh nomini olish (Telegram API orqali)
-        try:
-            chat = await bot.get_chat(group_id)
-            actual_name = chat.title or name or "Nomsiz"
-            # Agar nom kiritilmagan bo'lsa, Telegram'dan olingan nomni saqlash
-            if not name:
-                await add_group_to_db(group_id, actual_name)
-        except Exception:
-            actual_name = name or "Nomsiz"
-        
         await m.answer(
-            f"✅ <b>Guruh muvaffaqiyatli qo'shildi!</b>\n\n"
-            f"📚 Guruh: {actual_name}\n"
-            f"🆔 ID: <code>{group_id}</code>\n\n"
-            f"🔢 Jami guruhlar: {len(GROUP_IDS)}",
+            f"✅ <b>Muvaffaqiyatli qo'shildi!</b>\n\n"
+            f"{type_emoji} <b>Tur:</b> {type_name}\n"
+            f"📚 <b>Nom:</b> {actual_name}\n"
+            f"🆔 <b>ID:</b> <code>{group_id}</code>\n\n"
+            f"🔢 <b>Jami:</b> {len(GROUP_IDS)} ta",
             parse_mode="HTML"
         )
-        logger.info(f"Admin {m.from_user.id} added group {group_id} ({actual_name})")
+        logger.info(f"Admin {m.from_user.id} added {chat_type} {group_id} ({actual_name})")
         
     except ValueError:
-        await m.answer("❌ Guruh ID raqam bo'lishi kerak!")
+        await m.answer("❌ ID raqam bo'lishi kerak!")
     except Exception as e:
         logger.error(f"Error in cmd_add_group: {e}")
         await m.answer(f"❌ Xatolik yuz berdi: {e}")
