@@ -453,9 +453,9 @@ async def remove_group_from_db(group_id: int):
         await conn.execute("DELETE FROM groups WHERE group_id=$1", group_id)
 
 async def get_all_groups():
-    """Barcha guruhlarni olish."""
+    """Barcha guruhlarni olish (type bilan)."""
     async with db_pool.acquire() as conn:
-        return await conn.fetch("SELECT id, group_id, name, created_at FROM groups ORDER BY id")
+        return await conn.fetch("SELECT id, group_id, name, type, created_at FROM groups ORDER BY id")
 
 async def clear_user_group(uid: int, gid: int):
     async with db_pool.acquire() as conn:
@@ -1185,7 +1185,7 @@ async def cmd_expiring(m: Message):
 
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
-    """Barcha guruhlarni ko'rsatish (database'dan)."""
+    """Barcha guruhlarni ko'rsatish (database'dan) - nomlar bilan."""
     if not is_admin(m.from_user.id):
         return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
     
@@ -1201,10 +1201,32 @@ async def cmd_groups(m: Message):
     lines = ["🔗 <b>Ulangan guruhlar:</b>\n"]
     for row in groups:
         gid = row['group_id']
-        name = row['name'] or "Nomsiz"
+        name = row['name']
+        gtype = row.get('type', 'group')
         created_at = row['created_at']
         created_date = (datetime.utcfromtimestamp(created_at) + TZ_OFFSET).strftime("%Y-%m-%d")
-        lines.append(f"• <b>{name}</b>\n   ID: <code>{gid}</code>\n   Qo'shilgan: {created_date}\n")
+        
+        # Agar nom bo'sh bo'lsa, Telegram'dan olish va yangilash
+        if not name or name.startswith("Guruh #"):
+            try:
+                chat = await bot.get_chat(gid)
+                name = chat.title or f"Guruh #{gid}"
+                
+                # Database'ni yangilash
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE groups SET name = $1 WHERE group_id = $2",
+                        name, gid
+                    )
+                logger.info(f"Updated group name for {gid}: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to get chat title for {gid}: {e}")
+                name = f"Guruh #{gid}"
+        
+        # Guruh turi emoji
+        type_emoji = "📢" if gtype == "channel" else "👥"
+        
+        lines.append(f"{type_emoji} <b>{name}</b>\n   ID: <code>{gid}</code>\n   Qo'shilgan: {created_date}\n")
     
     lines.append("\n💡 Buyruqlar:")
     lines.append("➕ <code>/add_group GROUP_ID [Guruh nomi]</code>")
