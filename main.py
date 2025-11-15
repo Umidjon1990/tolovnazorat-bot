@@ -4628,10 +4628,19 @@ async def cb_group_delete_cancel(c: CallbackQuery):
     await c.answer("Bekor qilindi")
 
 _WARNED_CACHE: dict[tuple[int, int, str], int] = {}
+_REMOVED_GROUPS_CACHE: set[int] = set()  # O'chirilgan guruhlar cache'i
 
 async def handle_missing_chat(group_id: int, reason: str = "chat not found"):
     """Agar guruh topilmasa, database'dan avtomatik o'chirish."""
     try:
+        # Agar bu guruh allaqachon o'chirilgan bo'lsa, qayta ishlamaslik
+        if group_id in _REMOVED_GROUPS_CACHE:
+            logger.debug(f"Group {group_id} already processed for removal, skipping")
+            return
+        
+        # Cache'ga qo'shamiz - bir marta ishlasin
+        _REMOVED_GROUPS_CACHE.add(group_id)
+        
         logger.error(f"Group {group_id} not found in Telegram ({reason}) - removing from database")
         
         # Guruh nomini olish (log uchun)
@@ -4655,7 +4664,7 @@ async def handle_missing_chat(group_id: int, reason: str = "chat not found"):
         
         logger.info(f"Successfully removed invalid group {group_id} ({group_name}) from database")
         
-        # Super adminlarga xabar yuborish
+        # Super adminlarga FAQAT BIR MARTA xabar yuborish
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(
