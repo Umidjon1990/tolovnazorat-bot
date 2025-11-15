@@ -963,6 +963,7 @@ def admin_reply_keyboard(uid: int) -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 Guruh o'quvchilari")],
         [KeyboardButton(text="💳 To'lovlar"), KeyboardButton(text="💳 To'lov ma'lumoti")],
+        [KeyboardButton(text="📋 Guruhlar ro'yxati")],
     ]
     
     # Super admin uchun qo'shimcha tugmalar
