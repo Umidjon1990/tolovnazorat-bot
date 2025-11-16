@@ -9,6 +9,7 @@ The primary active workflow is **Payment-First Registration**: users register di
 - **Multi-Admin Security**: Admins only see payments for their assigned groups (super admins see all)
 - **Auto-Subscription**: Subscription automatically starts when user joins group via invite link
 - **3-Day Reminder**: Users and admins receive notifications 3 days before subscription expires
+- **Smart Error Handling**: Bot provides clear, actionable error messages for common issues (chat not found, insufficient permissions, etc.)
 
 The system also retains a **Legacy Mini App Payment Workflow** (currently inactive) that uses a React Mini App and FastAPI for payment-based subscriptions. This legacy code is preserved for future expansion.
 

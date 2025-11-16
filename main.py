@@ -5752,8 +5752,25 @@ async def cb_warn_notpaid(c: CallbackQuery):
                     return await c.answer("Guruhda emas")
                     
             except Exception as e:
+                error_msg = str(e)
                 logger.warning(f"Failed to get member status for {uid} in {gid}: {e}")
-                await c.message.answer(f"⚠️ Foydalanuvchi holati tekshirilmadi: {e}")
+                
+                # Guruh topilmasa
+                if "chat not found" in error_msg.lower() or "chat_not_found" in error_msg.lower():
+                    await c.message.answer(
+                        f"❌ <b>Guruh topilmadi!</b>\n\n"
+                        f"Guruh ID: <code>{gid}</code>\n\n"
+                        f"Sabablari:\n"
+                        f"• Bot guruhga qo'shilmagan\n"
+                        f"• Bot guruhdan chiqarilgan\n"
+                        f"• Guruh o'chirilgan\n\n"
+                        f"✅ Bot'ni guruhga admin sifatida qo'shing!",
+                        parse_mode="HTML"
+                    )
+                    return await c.answer("❌ Guruh topilmadi!", show_alert=True)
+                
+                # Boshqa xatoliklar
+                await c.message.answer(f"⚠️ Foydalanuvchi holati tekshirilmadi: {error_msg}")
                 return await c.answer("Xatolik", show_alert=True)
             
             # Kick qilish
@@ -5784,19 +5801,32 @@ async def cb_warn_notpaid(c: CallbackQuery):
                 logger.error(f"Error kicking user {uid} from group {gid}: {error_msg}")
                 
                 # Xatolik turini aniqlash
-                if "not enough rights" in error_msg.lower():
+                if "chat not found" in error_msg.lower() or "chat_not_found" in error_msg.lower():
                     await c.message.answer(
-                        f"❌ <b>Xatolik!</b>\n\n"
-                        f"Bot'da guruhda a'zolarni chiqarish huquqi yo'q.\n\n"
-                        f"Guruh sozlamalarida bot'ga 'Foydalanuvchilarni ban qilish' huquqini bering.",
+                        f"❌ <b>Guruh topilmadi!</b>\n\n"
+                        f"Guruh ID: <code>{gid}</code>\n\n"
+                        f"Sabablari:\n"
+                        f"• Bot guruhga qo'shilmagan\n"
+                        f"• Bot guruhdan chiqarilgan\n"
+                        f"• Guruh o'chirilgan\n\n"
+                        f"✅ Bot'ni guruhga admin sifatida qo'shing!",
                         parse_mode="HTML"
                     )
+                    await c.answer("❌ Guruh topilmadi!", show_alert=True)
+                elif "not enough rights" in error_msg.lower():
+                    await c.message.answer(
+                        f"❌ <b>Huquq yetarli emas!</b>\n\n"
+                        f"Bot guruhda admin, lekin a'zolarni chiqarish huquqi yo'q.\n\n"
+                        f"✅ Guruh sozlamalarida bot'ga <b>\"Foydalanuvchilarni cheklash\"</b> huquqini bering.",
+                        parse_mode="HTML"
+                    )
+                    await c.answer("❌ Huquq yo'q!", show_alert=True)
                 elif "user not found" in error_msg.lower():
                     await c.message.answer("ℹ️ Foydalanuvchi guruhda topilmadi.")
+                    await c.answer("Topilmadi", show_alert=True)
                 else:
                     await c.message.answer(f"❌ Chiqarishda xatolik: {error_msg}")
-                
-                await c.answer("❌ Xatolik yuz berdi", show_alert=True)
+                    await c.answer("❌ Xatolik!", show_alert=True)
         else:
             await c.message.answer(f"⌛ Foydalanuvchi {uid} hali to'lov qilmagan deb qayd etildi. ({count}/3)")
             await c.answer(f"Qayd etildi ({count}/3)")
