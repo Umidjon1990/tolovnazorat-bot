@@ -89,6 +89,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - **User Management**:
     - `/add_user USER_ID [DATE]` - Manually add single user (bugundan or YYYY-MM-DD)
     - `/add_users ID1 ID2 ID3 ... [DATE]` - Bulk add multiple users
+    - `/remove_user USER_ID` - Completely remove user from system (with confirmation dialog)
     - `/unregistered` - Show users in group without active subscription
   - **Contract Management**:
     - `/edit_contract` - Update contract template (text or file)
@@ -133,6 +134,14 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - Uses ban + unban pattern for clean removal
   - Sends clear instructions to removed users on proper registration process
   - Prevents unauthorized group access while maintaining payment-first workflow integrity
+- **Complete User Removal System**:
+  - Admin command `/remove_user USER_ID` with double-confirmation dialog
+  - Removes user from all Telegram groups (ban + unban pattern)
+  - Hard-deletes user records from `users` and `user_groups` tables
+  - Marks payments as 'removed' instead of deleting (preserves audit trail)
+  - Clears all state caches (WAIT_FULLNAME_FOR, WAIT_CONTACT_FOR, etc)
+  - Sends notification to user explaining removal and re-registration process
+  - Re-registration supported: Deleted users can rejoin by starting fresh via `/start`
 - **Telegram Mini App (Legacy Workflow)**: React frontend (Vite) and FastAPI backend for user registration, course selection, payment submission, and admin operations. Features Telegram `initData` verification for authentication
 
 # Deployment Architecture
