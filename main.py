@@ -472,6 +472,91 @@ async def clear_user_group_extra(uid: int, gid: int):
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM user_groups WHERE user_id=$1 AND group_id=$2", uid, gid)
 
+async def remove_user_completely(uid: int, admin_id: int) -> dict:
+    """
+    User'ni tizimdan butunlay o'chirish.
+    
+    Args:
+        uid: User ID
+        admin_id: Admin ID (logging uchun)
+    
+    Returns:
+        dict: {
+            'removed_from_groups': [gid1, gid2, ...],
+            'payments_flagged': int,
+            'success': bool,
+            'error': str or None
+        }
+    """
+    result = {
+        'removed_from_groups': [],
+        'payments_flagged': 0,
+        'success': False,
+        'error': None
+    }
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # 1. User ma'lumotlarini olish (guruhlarni bilish uchun)
+            user_row = await conn.fetchrow("SELECT user_id, group_id, username, full_name FROM users WHERE user_id=$1", uid)
+            user_groups_rows = await conn.fetch("SELECT group_id FROM user_groups WHERE user_id=$1", uid)
+            
+            if not user_row and not user_groups_rows:
+                result['error'] = "User database'da topilmadi"
+                return result
+            
+            # Barcha guruhlarni yig'ish
+            groups_to_remove = []
+            if user_row and user_row['group_id']:
+                groups_to_remove.append(user_row['group_id'])
+            for row in user_groups_rows:
+                if row['group_id'] not in groups_to_remove:
+                    groups_to_remove.append(row['group_id'])
+            
+            # 2. Telegram guruhlaridan chiqarish
+            for gid in groups_to_remove:
+                try:
+                    await bot.ban_chat_member(gid, uid)
+                    await bot.unban_chat_member(gid, uid)  # Ban'ni olib tashlash
+                    result['removed_from_groups'].append(gid)
+                    logger.info(f"User {uid} removed from Telegram group {gid} by admin {admin_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove user {uid} from group {gid}: {e}")
+            
+            # 3. Database'dan o'chirish
+            # users jadvalidan o'chirish
+            await conn.execute("DELETE FROM users WHERE user_id=$1", uid)
+            
+            # user_groups jadvalidan o'chirish
+            await conn.execute("DELETE FROM user_groups WHERE user_id=$1", uid)
+            
+            # 4. Payment'larni 'removed' qilish (audit trail uchun saqlaymiz)
+            payments_result = await conn.execute(
+                "UPDATE payments SET status='removed' WHERE user_id=$1 AND status != 'removed'",
+                uid
+            )
+            result['payments_flagged'] = int(payments_result.split()[-1]) if payments_result else 0
+            
+            logger.info(f"User {uid} completely removed by admin {admin_id}: "
+                       f"groups={result['removed_from_groups']}, payments_flagged={result['payments_flagged']}")
+            
+            result['success'] = True
+            
+    except Exception as e:
+        logger.error(f"Error in remove_user_completely for user {uid}: {e}")
+        result['error'] = str(e)
+    
+    # 5. Cache'larni tozalash (set va dict turlariga qarab)
+    # Sets - discard() ishlatamiz
+    WAIT_FULLNAME_FOR.discard(uid)
+    WAIT_CONTACT_FOR.discard(uid)
+    WAIT_PAYMENT_PHOTO.discard(uid)
+    
+    # Dict - pop() ishlatamiz
+    WAIT_DATE_FOR.pop(uid, None)
+    
+    return result
+
 async def get_user(uid: int):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT user_id, group_id, expires_at, username, full_name, phone, agreed_at FROM users WHERE user_id=$1", uid)
@@ -2438,6 +2523,106 @@ async def cmd_add_users(m: Message):
         
     except Exception as e:
         logger.error(f"Error in cmd_add_users: {e}")
+        await m.answer(f"Xatolik yuz berdi: {str(e)}")
+
+@dp.message(Command("remove_user"))
+async def cmd_remove_user(m: Message):
+    """Foydalanuvchini tizimdan butunlay o'chirish (confirmation bilan).
+    
+    Foydalanish:
+    - /remove_user USER_ID
+    
+    Bu komanda:
+    1. User'ni barcha guruhlardan chiqaradi
+    2. Database'dan barcha ma'lumotlarni o'chiradi
+    3. Payment'larni 'removed' qiladi (audit uchun saqlanadi)
+    4. Agar keyinroq qaytsa, qaytadan ro'yxatdan o'tishi kerak
+    
+    Misol:
+    - /remove_user 123456789
+    """
+    if not await is_active_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        parts = m.text.split()
+        
+        if len(parts) < 2:
+            return await m.answer(
+                "❗ *Foydalanish:*\n\n"
+                "`/remove_user USER_ID`\n\n"
+                "*Misol:*\n"
+                "• `/remove_user 123456789`\n\n"
+                "⚠️ *DIQQAT:*\n"
+                "Bu komanda user'ni BUTUNLAY o'chiradi:\n"
+                "• Barcha guruhlardan chiqaradi\n"
+                "• Database'dan o'chiradi\n"
+                "• Agar qaytsa, qaytadan ro'yxatdan o'tishi kerak",
+                parse_mode="Markdown"
+            )
+        
+        user_id = int(parts[1])
+        
+        # User ma'lumotlarini tekshirish
+        async with db_pool.acquire() as conn:
+            user_row = await conn.fetchrow("SELECT user_id, username, full_name FROM users WHERE user_id=$1", user_id)
+            user_groups_rows = await conn.fetch("SELECT group_id FROM user_groups WHERE user_id=$1", user_id)
+        
+        if not user_row and not user_groups_rows:
+            return await m.answer(
+                f"❌ User topilmadi!\n\n"
+                f"🆔 ID: <code>{user_id}</code>\n\n"
+                f"Bu user database'da mavjud emas.",
+                parse_mode="HTML"
+            )
+        
+        # User ma'lumotlarini tayyorlash
+        username = user_row['username'] if user_row else "Noma'lum"
+        full_name = user_row['full_name'] if user_row else "Noma'lum"
+        
+        # Guruhlar ro'yxati
+        groups_list = []
+        if user_row and user_row.get('group_id'):
+            groups_list.append(user_row['group_id'])
+        for row in user_groups_rows:
+            if row['group_id'] not in groups_list:
+                groups_list.append(row['group_id'])
+        
+        # Guruh nomlarini olish
+        titles = dict(await resolve_group_titles(groups_list))
+        groups_text = "\n".join([f"• {titles.get(gid, f'Guruh {gid}')}" for gid in groups_list])
+        
+        # Confirmation dialog
+        confirmation_text = (
+            f"⚠️ <b>TASDIQLASH KERAK!</b>\n\n"
+            f"👤 <b>User:</b>\n"
+            f"• ID: <code>{user_id}</code>\n"
+            f"• Ism: {full_name}\n"
+            f"• Username: @{username if username else 'yo\'q'}\n\n"
+            f"📚 <b>Guruhlar ({len(groups_list)} ta):</b>\n"
+            f"{groups_text}\n\n"
+            f"🗑 <b>Nima bo'ladi:</b>\n"
+            f"1. User barcha guruhlardan chiqariladi\n"
+            f"2. Database'dan o'chiriladi\n"
+            f"3. Payment'lar 'removed' qilinadi\n"
+            f"4. Agar qaytsa, qaytadan ro'yxatdan o'tishi kerak\n\n"
+            f"❓ Ishonchingiz komilmi?"
+        )
+        
+        # Confirmation buttons
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"confirm_remove:{user_id}"),
+                InlineKeyboardButton(text="❌ Yo'q, bekor qilish", callback_data=f"cancel_remove:{user_id}")
+            ]
+        ])
+        
+        await m.answer(confirmation_text, reply_markup=keyboard, parse_mode="HTML")
+        
+    except ValueError:
+        await m.answer("❌ Noto'g'ri format! User ID raqam bo'lishi kerak.")
+    except Exception as e:
+        logger.error(f"Error in cmd_remove_user: {e}")
         await m.answer(f"Xatolik yuz berdi: {str(e)}")
 
 @dp.message(Command("unregistered"))
@@ -4678,6 +4863,111 @@ async def cb_pick_group(c: CallbackQuery):
         await c.answer("✅ Havola yuborildi, barcha xabarlar tozalandi")
     except Exception as e:
         logger.error(f"Error in cb_pick_group: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("confirm_remove:"))
+async def cb_confirm_remove(c: CallbackQuery):
+    """User'ni butunlay o'chirish (tasdiqlangandan keyin)."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        user_id = int(c.data.split(":")[1])
+        
+        # Removing message
+        processing_msg = await c.message.answer("⏳ O'chirilmoqda...")
+        
+        # User'ni o'chirish
+        result = await remove_user_completely(user_id, c.from_user.id)
+        
+        if not result['success']:
+            await processing_msg.edit_text(
+                f"❌ <b>Xatolik yuz berdi!</b>\n\n"
+                f"User {user_id} ni o'chirib bo'lmadi:\n"
+                f"{result['error']}",
+                parse_mode="HTML"
+            )
+            return await c.answer("Xatolik!", show_alert=True)
+        
+        # Muvaffaqiyatli o'chirildi
+        removed_groups_count = len(result['removed_from_groups'])
+        payments_flagged = result['payments_flagged']
+        
+        # Guruh nomlarini olish
+        titles = dict(await resolve_group_titles(result['removed_from_groups']))
+        groups_text = "\n".join([f"• {titles.get(gid, f'Guruh {gid}')}" for gid in result['removed_from_groups']])
+        
+        success_text = (
+            f"✅ <b>MUVAFFAQIYATLI O'CHIRILDI!</b>\n\n"
+            f"🆔 User ID: <code>{user_id}</code>\n\n"
+            f"📊 <b>Natijalar:</b>\n"
+            f"• {removed_groups_count} ta guruhdan chiqarildi\n"
+            f"• Database'dan o'chirildi\n"
+            f"• {payments_flagged} ta payment 'removed' qilindi\n\n"
+            f"📚 <b>Guruhlar:</b>\n"
+            f"{groups_text}\n\n"
+            f"💬 User'ga notification yuborilmoqda..."
+        )
+        
+        await processing_msg.edit_text(success_text, parse_mode="HTML")
+        
+        # User'ga notification yuborish
+        try:
+            bot_username = (await bot.get_me()).username
+            await bot.send_message(
+                user_id,
+                f"⚠️ *Obuna bekor qilindi*\n\n"
+                f"Sizning obunangiz admin tomonidan bekor qilindi.\n\n"
+                f"📝 Qaytadan obuna olish uchun:\n"
+                f"1️⃣ Mening chatimda /start bosing: @{bot_username}\n"
+                f"2️⃣ Qaytadan ro'yxatdan o'ting\n"
+                f"3️⃣ To'lov qiling va admin tasdiqini kuting\n\n"
+                f"✅ Admin tasdiqlagach, guruhga qaytasiz.",
+                parse_mode="Markdown"
+            )
+            
+            # Admin'ga yangilangan xabar
+            await c.message.answer(
+                f"✅ User'ga notification yuborildi!",
+                parse_mode="HTML"
+            )
+        except Exception as notification_err:
+            logger.warning(f"Failed to send removal notification to user {user_id}: {notification_err}")
+            await c.message.answer(
+                f"⚠️ User o'chirildi, lekin notification yuborib bo'lmadi (user botni bloklagan bo'lishi mumkin).",
+                parse_mode="HTML"
+            )
+        
+        # Original message'ni o'chirish
+        try:
+            await c.message.delete()
+        except Exception:
+            pass
+        
+        await c.answer("✅ Muvaffaqiyatli o'chirildi!")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_confirm_remove: {e}")
+        await c.answer(f"Xatolik: {str(e)}", show_alert=True)
+
+@dp.callback_query(F.data.startswith("cancel_remove:"))
+async def cb_cancel_remove(c: CallbackQuery):
+    """User'ni o'chirishni bekor qilish."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        user_id = int(c.data.split(":")[1])
+        
+        await c.message.edit_text(
+            f"❌ <b>Bekor qilindi</b>\n\n"
+            f"User <code>{user_id}</code> o'chirilmadi.",
+            parse_mode="HTML"
+        )
+        await c.answer("Bekor qilindi")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_cancel_remove: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
 
 @dp.callback_query(F.data.startswith("reject:"))
