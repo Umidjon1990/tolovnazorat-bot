@@ -1051,36 +1051,116 @@ async def on_chat_member_updated(event: ChatMemberUpdated):
                 
                 logger.info(f"Subscription started for user {user.id} in {event.chat.type} {event.chat.id} - expires at {expiry_date}")
             else:
-                # Payment-first workflow: User guruhga faqat admin tasdiqidan keyin qo'shiladi
-                # Agar payment approved bo'lmasa - bu noto'g'ri holat (edge case: admin to'g'ridan qo'shgan)
-                # User'ni guruhdan chiqarish va admin'ga xabar yuborish
+                # ADMIN TASDIQISIZ HECH KIM CHIQARILMAYDI!
+                # User guruhga to'g'ridan qo'shilgan (admin qo'shgan yoki boshqa yo'l bilan)
+                # Lekin payment approved emas - admin'ga xabar yuboramiz va TASDIQINI KUTAMIZ!
+                
+                logger.warning(f"User {user.id} joined group {event.chat.id} without approved payment - waiting for admin approval")
+                
+                # Payment statusini aniqlash
+                payment_status_text = "❌ To'lov topilmadi"
+                if payment_row:
+                    if payment_row['status'] == 'pending':
+                        payment_status_text = "⏳ To'lov kutilmoqda"
+                    elif payment_row['status'] == 'rejected':
+                        payment_status_text = "❌ To'lov rad etilgan"
+                    elif payment_row['status'] == 'removed':
+                        payment_status_text = "🗑 To'lov o'chirilgan"
+                else:
+                    payment_status_text = "❌ To'lov topilmadi"
+                
+                # User profilini olish
                 try:
-                    # User'ni guruhdan chiqarish
-                    await bot.ban_chat_member(event.chat.id, user.id)
-                    await bot.unban_chat_member(event.chat.id, user.id)  # Ban'ni olib tashlash (faqat guruhdan chiqarish)
+                    profile = await fetch_user_profile(user.id)
+                    user_full_name = profile['full_name']
+                    user_username = profile['username']
+                    chat_link = profile['chat_link']
+                except Exception:
+                    user_full_name = user.full_name or user.first_name or "Nomsiz"
+                    user_username = f"@{user.username}" if user.username else "Username yo'q"
+                    chat_link = f"[{user_full_name}](tg://user?id={user.id})"
+                
+                # Guruh nomini olish
+                group_title = event.chat.title or f"Guruh {event.chat.id}"
+                
+                # Admin'ga notification yuborish
+                admin_notification = (
+                    f"⚠️ <b>TASDIQ KERAK - Ruxsatsiz Kirish!</b>\n\n"
+                    f"👤 <b>User:</b>\n"
+                    f"{chat_link}\n"
+                    f"• ID: <code>{user.id}</code>\n"
+                    f"• Username: {user_username}\n\n"
+                    f"📚 <b>Guruh:</b> {group_title}\n"
+                    f"💳 <b>To'lov holati:</b> {payment_status_text}\n\n"
+                    f"❓ <b>Nima qilish kerak?</b>\n"
+                    f"• ✅ <b>Qoldirish</b> - User guruhda qoladi (keyin /add_user qiling)\n"
+                    f"• ❌ <b>Chiqarish</b> - User guruhdan chiqariladi\n\n"
+                    f"⚠️ <b>MUHIM:</b> Hech kim avtomatik chiqarilmaydi - sizning qaroringiz kerak!"
+                )
+                
+                # Inline buttons
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Qoldirish", callback_data=f"ujoin_keep:{event.chat.id}:{user.id}"),
+                        InlineKeyboardButton(text="❌ Chiqarish", callback_data=f"ujoin_remove:{event.chat.id}:{user.id}")
+                    ]
+                ])
+                
+                # Barcha adminlarga yuborish (guruh bo'yicha filter qilib)
+                try:
+                    admins_sent = 0
                     
-                    logger.warning(f"User {user.id} joined group {event.chat.id} without approved payment - removed from group")
+                    # Super adminlarga yuborish (barcha guruhlarga ruxsat)
+                    for aid in ADMIN_IDS:
+                        try:
+                            await bot.send_message(
+                                chat_id=aid,
+                                text=admin_notification,
+                                parse_mode="HTML",
+                                reply_markup=keyboard
+                            )
+                            admins_sent += 1
+                        except Exception as send_err:
+                            logger.warning(f"Failed to send unauthorized join notification to super admin {aid}: {send_err}")
                     
-                    # User'ga xabar yuborish
-                    bot_username = (await bot.get_me()).username
+                    # Database adminlarga yuborish (guruh bo'yicha filter qilib)
                     try:
-                        await bot.send_message(
-                            chat_id=user.id,
-                            text=(
-                                f"⚠️ *Guruhga kirish rad etildi*\n\n"
-                                f"Siz guruhga to'g'ridan qo'shilgansiz, lekin obuna aktiv emas.\n\n"
-                                f"📝 Obuna olish uchun:\n"
-                                f"1️⃣ Mening chatimda /start bosing: @{bot_username}\n"
-                                f"2️⃣ To'lov qiling va admin tasdiqini kuting\n\n"
-                                f"✅ Admin tasdiqlagach, sizga invite link yuboriladi."
-                            ),
-                            parse_mode="Markdown"
-                        )
-                    except Exception as msg_err:
-                        logger.warning(f"Failed to send removal notice to user {user.id}: {msg_err}")
+                        async with db_pool.acquire() as conn:
+                            db_admins = await conn.fetch(
+                                "SELECT user_id, managed_groups FROM admins WHERE active = true AND (expires_at IS NULL OR expires_at > $1)",
+                                int(datetime.utcnow().timestamp())
+                            )
+                            
+                            for admin_row in db_admins:
+                                admin_id = admin_row['user_id']
+                                
+                                # Super admin'ga yubormadikmi?
+                                if admin_id in ADMIN_IDS:
+                                    continue
+                                
+                                # Guruh ruxsati bormi?
+                                managed_groups = admin_row['managed_groups'] or []
+                                if event.chat.id not in managed_groups:
+                                    continue
+                                
+                                try:
+                                    await bot.send_message(
+                                        chat_id=admin_id,
+                                        text=admin_notification,
+                                        parse_mode="HTML",
+                                        reply_markup=keyboard
+                                    )
+                                    admins_sent += 1
+                                except Exception as send_err:
+                                    logger.warning(f"Failed to send unauthorized join notification to admin {admin_id}: {send_err}")
                     
-                except Exception as remove_err:
-                    logger.error(f"Failed to remove unapproved user {user.id} from group {event.chat.id}: {remove_err}")
+                    except Exception as db_err:
+                        logger.error(f"Failed to fetch admins for unauthorized join notification: {db_err}")
+                    
+                    logger.info(f"Sent unauthorized join notification for user {user.id} in group {event.chat.id} to {admins_sent} admins")
+                    
+                except Exception as notification_err:
+                    logger.error(f"Failed to send unauthorized join notifications: {notification_err}")
             
     except Exception as e:
         logger.error(f"Error in on_chat_member_updated: {e}")
@@ -2593,12 +2673,13 @@ async def cmd_remove_user(m: Message):
         groups_text = "\n".join([f"• {titles.get(gid, f'Guruh {gid}')}" for gid in groups_list])
         
         # Confirmation dialog
+        username_display = f"@{username}" if username else "yo'q"
         confirmation_text = (
             f"⚠️ <b>TASDIQLASH KERAK!</b>\n\n"
             f"👤 <b>User:</b>\n"
             f"• ID: <code>{user_id}</code>\n"
             f"• Ism: {full_name}\n"
-            f"• Username: @{username if username else 'yo\'q'}\n\n"
+            f"• Username: {username_display}\n\n"
             f"📚 <b>Guruhlar ({len(groups_list)} ta):</b>\n"
             f"{groups_text}\n\n"
             f"🗑 <b>Nima bo'ladi:</b>\n"
@@ -4969,6 +5050,154 @@ async def cb_cancel_remove(c: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in cb_cancel_remove: {e}")
         await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("ujoin_keep:"))
+async def cb_unauthorized_join_keep(c: CallbackQuery):
+    """Ruxsatsiz kirgan user'ni guruhda qoldirish."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        parts = c.data.split(":")
+        chat_id = int(parts[1])
+        user_id = int(parts[2])
+        
+        # User hali guruhda bormi tekshirish
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+            if member.status not in ("member", "administrator", "creator"):
+                await c.message.edit_text(
+                    f"⚠️ <b>User allaqachon guruhdan chiqib ketgan</b>\n\n"
+                    f"User ID: <code>{user_id}</code>\n"
+                    f"Guruh ID: <code>{chat_id}</code>\n\n"
+                    f"Hech narsa qilishga hojat yo'q.",
+                    parse_mode="HTML"
+                )
+                return await c.answer("User allaqachon guruhda emas")
+        except Exception as member_err:
+            logger.warning(f"Failed to check membership for user {user_id} in chat {chat_id}: {member_err}")
+            await c.message.edit_text(
+                f"⚠️ <b>User'ni tekshirib bo'lmadi</b>\n\n"
+                f"User ID: <code>{user_id}</code>\n"
+                f"Guruh ID: <code>{chat_id}</code>\n\n"
+                f"Xatolik: {str(member_err)}",
+                parse_mode="HTML"
+            )
+            return await c.answer("Xatolik yuz berdi", show_alert=True)
+        
+        # User guruhda qoldi - admin'ga xabar
+        await c.message.edit_text(
+            f"✅ <b>User guruhda qoldirildi</b>\n\n"
+            f"User ID: <code>{user_id}</code>\n"
+            f"Guruh ID: <code>{chat_id}</code>\n\n"
+            f"💡 <b>Keyingi qadam:</b>\n"
+            f"Agar bu user'ga obuna bermoqchi bo'lsangiz:\n"
+            f"<code>/add_user {user_id}</code>",
+            parse_mode="HTML"
+        )
+        await c.answer("✅ User guruhda qoldirildi")
+        
+        logger.info(f"Admin {c.from_user.id} kept unauthorized user {user_id} in group {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_unauthorized_join_keep: {e}")
+        await c.answer(f"Xatolik: {str(e)}", show_alert=True)
+
+@dp.callback_query(F.data.startswith("ujoin_remove:"))
+async def cb_unauthorized_join_remove(c: CallbackQuery):
+    """Ruxsatsiz kirgan user'ni guruhdan chiqarish."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        parts = c.data.split(":")
+        chat_id = int(parts[1])
+        user_id = int(parts[2])
+        
+        # Processing message
+        processing_msg = await c.message.answer("⏳ Chiqarilmoqda...")
+        
+        # User hali guruhda bormi tekshirish
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+            if member.status not in ("member", "administrator", "creator"):
+                await processing_msg.edit_text(
+                    f"⚠️ <b>User allaqachon guruhdan chiqib ketgan</b>\n\n"
+                    f"User ID: <code>{user_id}</code>\n"
+                    f"Guruh ID: <code>{chat_id}</code>",
+                    parse_mode="HTML"
+                )
+                
+                # Original message'ni o'chirish
+                try:
+                    await c.message.delete()
+                except Exception:
+                    pass
+                
+                return await c.answer("User allaqachon guruhda emas")
+        except Exception as member_err:
+            logger.warning(f"Failed to check membership for user {user_id} in chat {chat_id}: {member_err}")
+        
+        # User'ni guruhdan chiqarish (ban + unban pattern)
+        try:
+            await bot.ban_chat_member(chat_id, user_id)
+            await bot.unban_chat_member(chat_id, user_id)
+            
+            logger.info(f"Admin {c.from_user.id} removed unauthorized user {user_id} from group {chat_id}")
+            
+            # Success message
+            await processing_msg.edit_text(
+                f"✅ <b>User guruhdan chiqarildi!</b>\n\n"
+                f"User ID: <code>{user_id}</code>\n"
+                f"Guruh ID: <code>{chat_id}</code>\n\n"
+                f"📝 User'ga xabar yuborilmoqda...",
+                parse_mode="HTML"
+            )
+            
+            # User'ga notification yuborish
+            try:
+                bot_username = (await bot.get_me()).username
+                await bot.send_message(
+                    user_id,
+                    f"⚠️ *Guruhga kirish rad etildi*\n\n"
+                    f"Siz guruhga to'g'ridan qo'shilgansiz, lekin admin tasdiqlamadi.\n\n"
+                    f"📝 Obuna olish uchun:\n"
+                    f"1️⃣ Mening chatimda /start bosing: @{bot_username}\n"
+                    f"2️⃣ To'lov qiling va admin tasdiqini kuting\n\n"
+                    f"✅ Admin tasdiqlagach, sizga invite link yuboriladi.",
+                    parse_mode="Markdown"
+                )
+                
+                await c.message.answer("✅ User'ga notification yuborildi!")
+                
+            except Exception as notification_err:
+                logger.warning(f"Failed to send removal notification to user {user_id}: {notification_err}")
+                await c.message.answer(
+                    f"⚠️ User chiqarildi, lekin notification yuborib bo'lmadi (user botni bloklagan bo'lishi mumkin).",
+                    parse_mode="HTML"
+                )
+            
+            # Original message'ni o'chirish
+            try:
+                await c.message.delete()
+            except Exception:
+                pass
+            
+            await c.answer("✅ User chiqarildi!")
+            
+        except Exception as remove_err:
+            logger.error(f"Failed to remove user {user_id} from chat {chat_id}: {remove_err}")
+            await processing_msg.edit_text(
+                f"❌ <b>Xatolik yuz berdi!</b>\n\n"
+                f"User {user_id} ni guruh {chat_id} dan chiqarib bo'lmadi:\n"
+                f"{str(remove_err)}",
+                parse_mode="HTML"
+            )
+            await c.answer("Xatolik!", show_alert=True)
+        
+    except Exception as e:
+        logger.error(f"Error in cb_unauthorized_join_remove: {e}")
+        await c.answer(f"Xatolik: {str(e)}", show_alert=True)
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def cb_reject(c: CallbackQuery):

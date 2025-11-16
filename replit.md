@@ -129,11 +129,18 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
   - Auto-updates database with real group names from Telegram API when default "Guruh #N" names are encountered
   - Ensures admin panel shows readable group names instead of IDs
   - Single database query for performance, with automatic name caching
-- **Unauthorized Join Protection**: 
-  - Automatically removes users who join group without approved payment (edge case: manual admin add)
-  - Uses ban + unban pattern for clean removal
-  - Sends clear instructions to removed users on proper registration process
-  - Prevents unauthorized group access while maintaining payment-first workflow integrity
+- **Admin-Mediated Unauthorized Join Protection** (CRITICAL PRODUCTION FIX):
+  - **BOT NEVER REMOVES USERS WITHOUT ADMIN APPROVAL** - Critical safety feature for 103+ production subscribers
+  - When user joins without approved payment, bot sends notification to admin with:
+    - User details (ID, name, username)
+    - Payment status (pending/rejected/none/removed)
+    - Group information
+    - Inline buttons: "✅ Qoldirish (Keep)" and "❌ Chiqarish (Remove)"
+  - Admin approval required - NO automatic removal
+  - "Qoldirish" keeps user in group, suggests `/add_user` for subscription
+  - "Chiqarish" removes user via ban + unban pattern and sends notification
+  - Group-level admin filtering - regular admins only see their groups
+  - Race condition handling - checks if user already left before action
 - **Complete User Removal System**:
   - Admin command `/remove_user USER_ID` with double-confirmation dialog
   - Removes user from all Telegram groups (ban + unban pattern)
