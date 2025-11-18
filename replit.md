@@ -6,9 +6,10 @@ The primary active workflow is **Payment-First Registration**: users register di
 
 **Key Features:**
 - **Payment-First Flow**: Register → Pay → Upload Receipt → Admin Approval → 24h Invite Link → Join Group → 30-Day Subscription Starts
+- **Subscription Renewal Flow**: `/renew` command → Payment info → Upload receipt → Admin approval → Auto-extend +30 days
 - **Multi-Admin Security**: Admins only see payments for their assigned groups (super admins see all)
 - **Auto-Subscription**: Subscription automatically starts when user joins group via invite link
-- **3-Day Reminder**: Users and admins receive notifications 3 days before subscription expires
+- **3-Day Reminder**: Users and admins receive notifications 3 days before subscription expires with `/renew` command guidance
 - **Smart Error Handling**: Bot provides clear, actionable error messages for common issues (chat not found, insufficient permissions, etc.)
 
 The system also retains a **Legacy Mini App Payment Workflow** (currently inactive) that uses a React Mini App and FastAPI for payment-based subscriptions. This legacy code is preserved for future expansion.
@@ -32,7 +33,7 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Design**: Production-ready relational database with connection pooling (2-10 connections) for performance.
 - **Tables**: 
   - `users` (core info, subscription details, `course_name`)
-  - `payments` (records, approval status)
+  - `payments` (records, approval status, **`payment_type`** for 'initial' vs 'renewal')
   - `user_groups` (many-to-many group access)
   - `contract_templates` (editable contract text with history)
   - **`groups`** (database-driven group management for multi-tenant support)
@@ -68,7 +69,12 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 
 ## Bot Features
 - **User Flow**: Contract acceptance, name/phone input, admin approval with date selection, and group membership.
+- **Renewal Flow**: Existing users use `/renew` command to submit renewal payments, admin approves, system auto-extends subscription +30 days
 - **Security**: Group membership validation - only users in configured groups can register.
+- **User Commands**:
+  - `/start` - Initial registration flow
+  - `/renew` - Subscription renewal (submit new payment receipt)
+  - `/myid` - Get Telegram user ID
 - **Admin Commands**: 
   - `/myid` - User's Telegram ID
   - **Groups Management** (Multi-Tenant Ready):
@@ -112,6 +118,17 @@ Preferred communication style: Simple, everyday language (Uzbek/English).
 - **Smart Chat Links**: User messages use `[username](tg://user?id=...)` for clickable profiles.
 
 ## Technical Implementations
+- **Subscription Renewal System**:
+  - `/renew` command displays payment info from `payment_settings` table
+  - FSM state `WAIT_RENEWAL_RECEIPT` captures renewal payment photos
+  - `payment_type='renewal'` column differentiates renewals from initial payments
+  - Duplicate prevention: `has_pending_renewal()` blocks multiple concurrent renewals
+  - Admin notification shows "🔄 YANGILANISH TO'LOVI" for renewal payments
+  - Approval callback `cb_ms_confirm` branches on payment_type:
+    - **Initial**: Creates new subscription + sends invite links (existing flow)
+    - **Renewal**: Extends existing `expires_at` by +30 days (no new links needed)
+  - Expiry calculation: `new_expires_at = max(current_expires_at, now) + 30 days` (early renewals preserve remaining days)
+  - Warning messages include "/renew buyrug'ini yuboring" for clear user guidance
 - **Payment-First Registration Flow**:
   - Users register via `/start` without group membership requirement
   - Phone number collection triggers payment info display (bank card details from `payment_settings` database table)

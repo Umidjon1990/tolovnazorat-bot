@@ -368,8 +368,8 @@ async def set_payment_status(pid: int, status: str, admin_id: Optional[int]):
 
 async def get_payment(pid: int):
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT id, user_id, status, photo_file FROM payments WHERE id=$1", pid)
-        return (row['id'], row['user_id'], row['status'], row['photo_file']) if row else None
+        row = await conn.fetchrow("SELECT id, user_id, status, photo_file, payment_type FROM payments WHERE id=$1", pid)
+        return (row['id'], row['user_id'], row['status'], row['photo_file'], row.get('payment_type', 'initial')) if row else None
 
 async def has_pending_renewal(user_id: int) -> bool:
     """User'ning pending renewal payment'i bormi?"""
@@ -4862,9 +4862,89 @@ async def cb_ms_confirm(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, user_id, status, photo_file_id = row
+        _pid, user_id, status, photo_file_id, payment_type = row
         if status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
+        
+        username, full_name = await fetch_user_profile(user_id)
+        
+        # RENEWAL LOGIC: Yangilanish to'lovi uchun alohida flow
+        if payment_type == 'renewal':
+            # User'ning hozirgi barcha guruhlarini olish
+            user_row = await get_user(user_id)
+            if not user_row:
+                return await c.answer("User topilmadi!", show_alert=True)
+            
+            current_expires_at = user_row[2]  # expires_at
+            now = int(datetime.utcnow().timestamp())
+            
+            # Yangi expires_at: hozirgi muddatdan yoki hozirgi vaqtdan +30 kun
+            # (agar erta yangilasa, kunlar saqlanadi)
+            base_time = max(current_expires_at if current_expires_at else now, now)
+            new_expires_at = base_time + (SUBSCRIPTION_DAYS * 86400)
+            
+            # Database'ni yangilash
+            await update_user_expiry(user_id, new_expires_at)
+            await set_payment_status(pid, "approved", c.from_user.id)
+            
+            # User'ning barcha guruhlaridagi muddatni uzaytirish
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE user_groups SET expires_at = $1 WHERE user_id = $2",
+                    new_expires_at, user_id
+                )
+            
+            human_exp = (datetime.utcfromtimestamp(new_expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
+            
+            # User'ga xabar yuborish (linklar YO'Q - allaqachon guruhda)
+            try:
+                await bot.send_message(
+                    user_id,
+                    "✅ *Yangilanish to'lovi tasdiqlandi!*\n\n"
+                    f"♻️ Obunangiz yangilandi!\n"
+                    f"⏳ Yangi tugash sanasi: *{human_exp}*\n\n"
+                    f"📚 Barcha guruhlaringizda davom eting!",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send renewal approval message to user {user_id}: {e}")
+            
+            # Admin'ga xulosa
+            try:
+                titles = dict(await resolve_group_titles())
+                user_groups = await conn.fetch("SELECT group_id FROM user_groups WHERE user_id = $1", user_id)
+                group_names = ", ".join([titles.get(r['group_id'], str(r['group_id'])) for r in user_groups])
+                
+                phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+                chat_link = f"📧 [{username}](tg://user?id={user_id})" if username else f"📧 [Chat ochish](tg://user?id={user_id})"
+                
+                final_caption = (
+                    f"✅ *YANGILANISH TASDIQLANDI*\n\n"
+                    f"♻️ To'lov turi: RENEWAL\n"
+                    f"👤 {full_name}\n"
+                    f"{chat_link}\n"
+                    f"📞 Telefon: {phone}\n"
+                    f"🏫 Guruhlar: {group_names}\n"
+                    f"⏳ Yangi tugash: {human_exp}"
+                )
+                await bot.send_photo(c.from_user.id, photo_file_id, caption=final_caption, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"Failed to send renewal summary to admin: {e}")
+            
+            # Admin xabarlarini tozalash
+            if pid in ADMIN_MESSAGES:
+                for msg_id in ADMIN_MESSAGES[pid]:
+                    try:
+                        await bot.delete_message(c.from_user.id, msg_id)
+                    except Exception:
+                        pass
+                del ADMIN_MESSAGES[pid]
+            
+            MULTI_PICK.pop(c.from_user.id, None)
+            logger.info(f"Renewal payment {pid} approved for user {user_id}, new expiry: {human_exp}")
+            return await c.answer("✅ Yangilanish tasdiqlandi!")
+        
+        # INITIAL PAYMENT LOGIC: Dastlabki to'lov uchun eski flow
         start_dt = datetime.utcnow()
         if start_iso:
             try:
@@ -4872,7 +4952,6 @@ async def cb_ms_confirm(c: CallbackQuery):
             except Exception:
                 pass
         expires_at = int((start_dt + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
-        username, full_name = await fetch_user_profile(user_id)
         state = MULTI_PICK.get(c.from_user.id)
         if not state or state.get("pid") != pid:
             return await c.answer("Sessiya topilmadi.", show_alert=True)
