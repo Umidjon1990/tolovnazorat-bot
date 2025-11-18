@@ -1993,7 +1993,10 @@ async def cmd_dashboard(m: Message):
                           AND p.created_at >= $1
                           AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
                           AND (u.expires_at IS NULL OR u.expires_at > $2)
-                          AND u.group_id = ANY($3)
+                          AND (
+                              u.group_id = ANY($3)
+                              OR EXISTS (SELECT 1 FROM user_groups WHERE user_id = p.user_id AND group_id = ANY($3))
+                          )
                     ORDER BY p.created_at DESC
                 """, three_days_ago, now, allowed_groups)
                 
@@ -2397,7 +2400,10 @@ async def cb_approved_payments(callback: CallbackQuery):
                     LEFT JOIN users u ON p.user_id = u.user_id
                     WHERE p.status = 'approved' 
                           AND p.created_at >= $1
-                          AND u.group_id = ANY($2)
+                          AND (
+                              u.group_id = ANY($2)
+                              OR EXISTS (SELECT 1 FROM user_groups WHERE user_id = p.user_id AND group_id = ANY($2))
+                          )
                     ORDER BY p.created_at DESC
                     LIMIT 20
                 """, three_days_ago, allowed_groups)
@@ -4434,60 +4440,22 @@ async def admin_pending_button(m: Message):
 
 @dp.message(F.text == "💳 To'lovlar")
 async def admin_payments_button(m: Message):
-    """Admin To'lovlar tugmasi handleri."""
+    """Admin To'lovlar tugmasi handleri - yangi 3 tugmali menu."""
     if not await is_active_admin(m.from_user.id):
         return
     
-    try:
-        # Admin'ning ruxsat etilgan guruhlarini olish
-        allowed_groups = await get_allowed_groups(m.from_user.id)
-        
-        # Pending va approved to'lovlar sonini olish (faqat ruxsat etilgan guruhlarga tegishli)
-        async with db_pool.acquire() as conn:
-            if is_super_admin(m.from_user.id):
-                # Super admin barcha to'lovlarni ko'radi
-                pending_count = await conn.fetchval("SELECT COUNT(*) FROM payments WHERE status = 'pending'")
-                approved_count = await conn.fetchval("SELECT COUNT(*) FROM payments WHERE status = 'approved'")
-            else:
-                # Regular admin faqat o'z guruhlariga tegishli to'lovlarni ko'radi
-                if not allowed_groups:
-                    await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
-                    return
-                
-                # User_groups jadvalidan user'lar ro'yxatini olish
-                user_ids_in_groups = await conn.fetch(
-                    "SELECT DISTINCT user_id FROM user_groups WHERE group_id = ANY($1)", 
-                    allowed_groups
-                )
-                user_ids = [row['user_id'] for row in user_ids_in_groups]
-                
-                if not user_ids:
-                    pending_count = 0
-                    approved_count = 0
-                else:
-                    pending_count = await conn.fetchval(
-                        "SELECT COUNT(*) FROM payments WHERE status = 'pending' AND user_id = ANY($1)", 
-                        user_ids
-                    )
-                    approved_count = await conn.fetchval(
-                        "SELECT COUNT(*) FROM payments WHERE status = 'approved' AND user_id = ANY($1)", 
-                        user_ids
-                    )
-        
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"⏳ Kutilayotganlar ({pending_count})", callback_data="payments_pending")],
-            [InlineKeyboardButton(text=f"✅ Tasdiqlangan ({approved_count})", callback_data="payments_approved")]
-        ])
-        
-        await m.answer(
-            "💳 <b>To'lovlar</b>\n\n"
-            "Qaysi birini ko'rmoqchisiz?",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"Error in admin_payments_button: {e}")
-        await m.answer("Xatolik yuz berdi")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🆕 Guruhga qo'shilish kutilmoqda", callback_data="pay_pending_initial")],
+        [InlineKeyboardButton(text="🔄 Obuna yangilash kutilmoqda", callback_data="pay_pending_renewal")],
+        [InlineKeyboardButton(text="✅ Tasdiqlangan to'lovlar (3 kun)", callback_data="pay_approved")]
+    ])
+    
+    await m.answer(
+        "💳 *To'lovlar bo'limi*\n\n"
+        "Quyidagi kategoriyalardan birini tanlang:",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(F.data == "payments_pending")
 async def cb_payments_pending(c: CallbackQuery):
