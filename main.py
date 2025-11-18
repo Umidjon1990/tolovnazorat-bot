@@ -284,9 +284,26 @@ async def db_init():
                 await conn.execute("""
                     ALTER TABLE admins ADD COLUMN IF NOT EXISTS last_warning_sent_at BIGINT;
                 """)
-                logger.info("Migration: last_warning_sent_at column added/verified")
+                logger.info("Migration: last_warning_sent_at column added/verified for admins")
             except Exception as me:
-                logger.warning(f"Migration warning: {me}")
+                logger.warning(f"Migration warning (admins): {me}")
+            
+            # Migration: last_warning_sent_at for users and user_groups (kuniga 1 marta warning uchun)
+            try:
+                await conn.execute("""
+                    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_warning_sent_at BIGINT;
+                """)
+                logger.info("Migration: last_warning_sent_at column added/verified for users")
+            except Exception as me:
+                logger.warning(f"Migration warning (users): {me}")
+            
+            try:
+                await conn.execute("""
+                    ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS last_warning_sent_at BIGINT;
+                """)
+                logger.info("Migration: last_warning_sent_at column added/verified for user_groups")
+            except Exception as me:
+                logger.warning(f"Migration warning (user_groups): {me}")
             
             # Migration: groups jadvaliga 'type' ustuni qo'shish (group/channel farqlash uchun)
             try:
@@ -610,17 +627,33 @@ async def expired_user_groups():
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 async def soon_expiring_users(days: int):
+    """3 kun ichida expire bo'ladigan userlar, lekin FAQAT 24 soatdan eski warning bor yoki hech warning yo'q."""
     now = int(datetime.utcnow().timestamp())
     upper = now + days * 86400
+    threshold_24h = now - (24 * 60 * 60)  # 24 soat oldin
+    
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>$1 AND expires_at<=$2", now, upper)
+        rows = await conn.fetch("""
+            SELECT user_id, group_id, expires_at 
+            FROM users 
+            WHERE expires_at > $1 AND expires_at <= $2
+              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $3)
+        """, now, upper, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 async def soon_expiring_user_groups(days: int):
+    """3 kun ichida expire bo'ladigan user_groups, lekin FAQAT 24 soatdan eski warning bor yoki hech warning yo'q."""
     now = int(datetime.utcnow().timestamp())
     upper = now + days * 86400
+    threshold_24h = now - (24 * 60 * 60)  # 24 soat oldin
+    
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>$1 AND expires_at<=$2", now, upper)
+        rows = await conn.fetch("""
+            SELECT user_id, group_id, expires_at 
+            FROM user_groups 
+            WHERE expires_at > $1 AND expires_at <= $2
+              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $3)
+        """, now, upper, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 def start_keyboard() -> InlineKeyboardMarkup:
