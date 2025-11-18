@@ -33,7 +33,7 @@ The system employs a multi-tenant architecture, allowing multiple independent ad
 - **Dual Payment Flow**: "💳 To'lov qilish" button initiates new group registration, while "♻️ Obunani yangilash" button extends current subscriptions by +30 days without creating new invite links.
 - **Payment-First Registration**: Users register without prior group membership, submit payment receipts, and receive admin approval before getting a 24-hour invite link.
 - **Dynamic Settings**: Admins can update payment information and contract templates dynamically via bot commands, stored in the database.
-- **Automated Processes**: Includes auto-kick for expired members, 3-day expiry reminders to users and admins, and auto-deactivation of expired admin accounts.
+- **Automated Processes**: Includes auto-kick for expired members, 3-day expiry reminders (maximum once per 24 hours per user/group via `last_warning_sent_at` tracking), and auto-deactivation of expired admin accounts.
 - **Unauthorized Join Protection**: Bot notifies admins when unapproved users join a group, providing "Keep" or "Remove" options, requiring explicit admin action rather than automatic removal.
 - **Comprehensive User Removal**: `/remove_user` command allows admins to completely remove a user from the system, including Telegram groups, database records, and state caches, while supporting re-registration.
 
