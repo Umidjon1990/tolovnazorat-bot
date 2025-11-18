@@ -1548,7 +1548,8 @@ async def cb_start_renewal(c: CallbackQuery):
                 "❌ Siz hali ro'yxatdan o'tmagansiz.\n\n"
                 "Ro'yxatdan o'tish uchun /start buyrug'ini yuboring."
             )
-            return await c.answer("Ro'yxatdan o'tmagansiz", show_alert=True)
+            await c.answer("Ro'yxatdan o'tmagansiz", show_alert=True)
+            return
         
         # 2. Pending renewal bor-yo'qligini tekshirish
         if await has_pending_renewal(uid):
@@ -1556,7 +1557,8 @@ async def cb_start_renewal(c: CallbackQuery):
                 "⏳ Sizning yangilanish to'lovingiz hali ko'rib chiqilmoqda.\n\n"
                 "Iltimos, admin tasdiqini kuting."
             )
-            return await c.answer("To'lov kutilmoqda", show_alert=True)
+            await c.answer("To'lov kutilmoqda", show_alert=True)
+            return
         
         # 3. To'lov ma'lumotini ko'rsatish
         payment_settings = await get_payment_settings()
@@ -1565,7 +1567,8 @@ async def cb_start_renewal(c: CallbackQuery):
                 "❌ To'lov ma'lumotlari topilmadi.\n\n"
                 "Iltimos, admin bilan bog'laning."
             )
-            return await c.answer("To'lov ma'lumoti yo'q", show_alert=True)
+            await c.answer("To'lov ma'lumoti yo'q", show_alert=True)
+            return
         
         bank = payment_settings['bank_name']
         card = payment_settings['card_number']
