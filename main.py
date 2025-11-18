@@ -1535,6 +1535,75 @@ async def cmd_renew(m: Message):
         logger.error(f"Error in cmd_renew: {e}")
         await m.answer(f"❌ Xatolik yuz berdi: {e}")
 
+@dp.callback_query(F.data.startswith("start_renewal:"))
+async def cb_start_renewal(c: CallbackQuery):
+    """Warning message'dagi 'Obunani yangilash' tugmasi bosilganda."""
+    uid = c.from_user.id
+    
+    try:
+        # 1. User ro'yxatdan o'tganligini tekshirish
+        user_row = await get_user(uid)
+        if not user_row:
+            await c.message.answer(
+                "❌ Siz hali ro'yxatdan o'tmagansiz.\n\n"
+                "Ro'yxatdan o'tish uchun /start buyrug'ini yuboring."
+            )
+            return await c.answer("Ro'yxatdan o'tmagansiz", show_alert=True)
+        
+        # 2. Pending renewal bor-yo'qligini tekshirish
+        if await has_pending_renewal(uid):
+            await c.message.answer(
+                "⏳ Sizning yangilanish to'lovingiz hali ko'rib chiqilmoqda.\n\n"
+                "Iltimos, admin tasdiqini kuting."
+            )
+            return await c.answer("To'lov kutilmoqda", show_alert=True)
+        
+        # 3. To'lov ma'lumotini ko'rsatish
+        payment_settings = await get_payment_settings()
+        if not payment_settings:
+            await c.message.answer(
+                "❌ To'lov ma'lumotlari topilmadi.\n\n"
+                "Iltimos, admin bilan bog'laning."
+            )
+            return await c.answer("To'lov ma'lumoti yo'q", show_alert=True)
+        
+        bank = payment_settings['bank_name']
+        card = payment_settings['card_number']
+        amount = payment_settings['amount']
+        additional = payment_settings['additional_info'] or ""
+        
+        msg = (
+            "💳 <b>OBUNANI YANGILASH</b>\n\n"
+            f"🏦 Bank: <b>{bank}</b>\n"
+            f"💳 Karta raqami: <code>{card}</code>\n"
+            f"💰 Summa: <b>{amount} so'm</b>\n"
+        )
+        if additional:
+            msg += f"\n📝 Qo'shimcha: {additional}\n"
+        
+        msg += (
+            "\n📸 <b>To'lov chekini yuboring:</b>\n"
+            "To'lovni amalga oshirgandan so'ng, chek rasmini shu chatga yuboring."
+        )
+        
+        await c.message.answer(msg, parse_mode="HTML")
+        
+        # 4. State'ni o'rnatish
+        WAIT_RENEWAL_RECEIPT.add(uid)
+        logger.info(f"User {uid} started renewal via button")
+        
+        # Tugmani o'chirish (ikkinchi marta bosilmasligi uchun)
+        try:
+            await c.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        
+        await c.answer("✅ To'lov ma'lumoti yuborildi")
+        
+    except Exception as e:
+        logger.error(f"Error in cb_start_renewal: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
 @dp.message(Command("expiring"))
 async def cmd_expiring(m: Message):
     """Obunasi yaqin kunlarda tugaydigan foydalanuvchilarni ko'rsatish."""
@@ -5706,16 +5775,22 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
             "⏰ Obunangiz yaqin kunlarda tugaydi.\n"
             f"⏳ Tugash sanasi: {exp_str}\n"
             f"📆 Qolgan kun: {max(left,0)}\n\n"
-            "💳 Obunani yangilash uchun /renew buyrug'ini yuboring."
+            "💳 Obunani yangilash uchun quyidagi tugmani bosing:"
         )
     else:
         user_text = (
             "⚠️ Obunangiz muddati tugagan.\n"
             f"⏳ Tugash sanasi: {exp_str}\n\n"
-            "💳 Obunani yangilash uchun /renew buyrug'ini yuboring."
+            "💳 Obunani yangilash uchun quyidagi tugmani bosing:"
         )
+    
+    # Inline keyboard - Obunani yangilash tugmasi
+    renewal_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="♻️ Obunani yangilash", callback_data=f"start_renewal:{uid}")]
+    ])
+    
     try:
-        await bot.send_message(uid, user_text)
+        await bot.send_message(uid, user_text, reply_markup=renewal_kb)
     except Exception as e:
         logger.warning(f"Failed to send warning to user {uid}: {e}")
     tag = f"@{_username}" if _username else _full
