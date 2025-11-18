@@ -711,6 +711,16 @@ def contact_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True, one_time_keyboard=True
     )
 
+def user_reply_keyboard() -> ReplyKeyboardMarkup:
+    """User uchun doimiy 2 ta tugma - To'lov qilish va Obunani yangilash."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="💳 To'lov qilish"), KeyboardButton(text="♻️ Obunani yangilash")]
+        ],
+        resize_keyboard=True,
+        persistent=True  # Doimiy ko'rinib turadi
+    )
+
 async def resolve_group_titles(group_ids: Optional[list[int]] = None) -> list[tuple[int, str]]:
     """Guruh ID'larini nomlariga aylantirish.
     
@@ -1320,12 +1330,7 @@ async def cmd_start(m: Message):
                 except Exception:
                     lines.append("\n📸 To'lov qilish uchun quyidagi tugmani bosing.")
                 
-                # Tugma orqali to'lov qilish
-                renewal_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="💳 To'lov qilish", callback_data="renew_payment")]
-                ])
-                
-                await m.answer("\n".join(lines), parse_mode="HTML", reply_markup=renewal_kb)
+                await m.answer("\n".join(lines), parse_mode="HTML", reply_markup=user_reply_keyboard())
                 logger.info(f"User {m.from_user.id} has {len(active_subscriptions)} active subscription(s)")
                 return
             else:
@@ -1363,12 +1368,7 @@ async def cmd_start(m: Message):
                 except Exception:
                     lines.append("\n📸 To'lov qilish uchun quyidagi tugmani bosing.")
                 
-                # Tugma orqali to'lov qilish
-                renewal_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="💳 To'lov qilish", callback_data="renew_payment")]
-                ])
-                
-                await m.answer("\n".join(lines), parse_mode="HTML", reply_markup=renewal_kb)
+                await m.answer("\n".join(lines), parse_mode="HTML", reply_markup=user_reply_keyboard())
                 logger.info(f"User {m.from_user.id} has no active subscriptions")
                 return
         
@@ -1534,6 +1534,109 @@ async def cmd_renew(m: Message):
     except Exception as e:
         logger.error(f"Error in cmd_renew: {e}")
         await m.answer(f"❌ Xatolik yuz berdi: {e}")
+
+@dp.message(F.text == "💳 To'lov qilish")
+async def btn_payment(m: Message):
+    """'💳 To'lov qilish' tugmasi bosilganda - yangi guruh uchun to'lov."""
+    uid = m.from_user.id
+    
+    try:
+        # Payment settings olish
+        payment_settings = await get_payment_settings()
+        if not payment_settings:
+            return await m.answer(
+                "❌ To'lov ma'lumotlari topilmadi.\n\n"
+                "Iltimos, admin bilan bog'laning."
+            )
+        
+        bank = payment_settings['bank_name']
+        card = payment_settings['card_number']
+        amount = payment_settings['amount']
+        additional = payment_settings['additional_info'] or ""
+        
+        msg = (
+            "💳 <b>YANGI TO'LOV</b>\n\n"
+            f"🏦 Bank: <b>{bank}</b>\n"
+            f"💳 Karta raqami: <code>{card}</code>\n"
+            f"💰 Summa: <b>{amount} so'm</b>\n"
+        )
+        if additional:
+            msg += f"\n📝 Qo'shimcha: {additional}\n"
+        
+        msg += (
+            "\n📸 <b>To'lov chekini yuboring:</b>\n"
+            "To'lovni amalga oshirgandan so'ng, chek rasmini shu chatga yuboring.\n\n"
+            "💡 <i>Bu yangi guruhga yozilish uchun to'lov</i>"
+        )
+        
+        await m.answer(msg, parse_mode="HTML", reply_markup=user_reply_keyboard())
+        
+        # State'ni o'rnatish - initial payment
+        WAIT_PAYMENT_PHOTO.add(uid)
+        logger.info(f"User {uid} started initial payment via button")
+        
+    except Exception as e:
+        logger.error(f"Error in btn_payment: {e}")
+        await m.answer("Xatolik yuz berdi. Qaytadan urinib ko'ring.")
+
+@dp.message(F.text == "♻️ Obunani yangilash")
+async def btn_renew(m: Message):
+    """'♻️ Obunani yangilash' tugmasi bosilganda - hozirgi guruhlariga +30 kun."""
+    uid = m.from_user.id
+    
+    try:
+        # 1. User ro'yxatdan o'tganligini tekshirish
+        user_row = await get_user(uid)
+        if not user_row:
+            return await m.answer(
+                "❌ Siz hali ro'yxatdan o'tmagansiz.\n\n"
+                "Ro'yxatdan o'tish uchun /start buyrug'ini yuboring."
+            )
+        
+        # 2. Pending renewal bor-yo'qligini tekshirish
+        if await has_pending_renewal(uid):
+            return await m.answer(
+                "⏳ Sizning yangilanish to'lovingiz hali ko'rib chiqilmoqda.\n\n"
+                "Iltimos, admin tasdiqini kuting."
+            )
+        
+        # 3. To'lov ma'lumotini ko'rsatish
+        payment_settings = await get_payment_settings()
+        if not payment_settings:
+            return await m.answer(
+                "❌ To'lov ma'lumotlari topilmadi.\n\n"
+                "Iltimos, admin bilan bog'laning."
+            )
+        
+        bank = payment_settings['bank_name']
+        card = payment_settings['card_number']
+        amount = payment_settings['amount']
+        additional = payment_settings['additional_info'] or ""
+        
+        msg = (
+            "💳 <b>OBUNANI YANGILASH</b>\n\n"
+            f"🏦 Bank: <b>{bank}</b>\n"
+            f"💳 Karta raqami: <code>{card}</code>\n"
+            f"💰 Summa: <b>{amount} so'm</b>\n"
+        )
+        if additional:
+            msg += f"\n📝 Qo'shimcha: {additional}\n"
+        
+        msg += (
+            "\n📸 <b>To'lov chekini yuboring:</b>\n"
+            "To'lovni amalga oshirgandan so'ng, chek rasmini shu chatga yuboring.\n\n"
+            "💡 <i>Bu hozirgi guruhlaringizga +30 kun qo'shiladi</i>"
+        )
+        
+        await m.answer(msg, parse_mode="HTML", reply_markup=user_reply_keyboard())
+        
+        # 4. State'ni o'rnatish - renewal payment
+        WAIT_RENEWAL_RECEIPT.add(uid)
+        logger.info(f"User {uid} started renewal via button")
+        
+    except Exception as e:
+        logger.error(f"Error in btn_renew: {e}")
+        await m.answer("Xatolik yuz berdi. Qaytadan urinib ko'ring.")
 
 @dp.callback_query(F.data.startswith("start_renewal:"))
 async def cb_start_renewal(c: CallbackQuery):
