@@ -1877,6 +1877,362 @@ async def cmd_expiring(m: Message):
         logger.error(f"Error in cmd_expiring: {e}")
         await m.answer("Xatolik yuz berdi.")
 
+@dp.message(Command("dashboard"))
+async def cmd_dashboard(m: Message):
+    """Admin panel - barcha holat va statistika (alohida initial/renewal)."""
+    if not await is_active_admin(m.from_user.id):
+        return await m.answer(f"⛔ Bu buyruq faqat adminlar uchun.\n\nSizning ID: {m.from_user.id}")
+    
+    try:
+        admin_id = m.from_user.id
+        allowed_groups = await get_allowed_groups(admin_id)
+        is_super = is_super_admin(admin_id)
+        
+        if not is_super and not allowed_groups:
+            return await m.answer("❌ Sizga hech qanday guruh tayinlanmagan!")
+        
+        now = int(datetime.utcnow().timestamp())
+        three_days_ago = now - (3 * 24 * 60 * 60)
+        three_days_later = now + (3 * 24 * 60 * 60)
+        
+        async with db_pool.acquire() as conn:
+            if is_super:
+                pending_initial = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at,
+                           u.username, u.full_name, u.phone
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'pending' 
+                          AND p.created_at >= $1
+                          AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
+                    ORDER BY p.created_at DESC
+                """, three_days_ago)
+                
+                pending_renewal = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at,
+                           u.username, u.full_name, u.phone
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'pending' 
+                          AND p.created_at >= $1
+                          AND p.payment_type = 'renewal'
+                    ORDER BY p.created_at DESC
+                """, three_days_ago)
+                
+                approved_initial = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at,
+                           u.username, u.full_name, u.phone, u.group_id
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'approved' 
+                          AND p.created_at >= $1
+                          AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
+                          AND (u.expires_at IS NULL OR u.expires_at > $2)
+                    ORDER BY p.created_at DESC
+                """, three_days_ago, now)
+                
+                expired_users = await conn.fetch("""
+                    SELECT user_id, username, full_name, phone, group_id, expires_at
+                    FROM users
+                    WHERE expires_at IS NOT NULL AND expires_at < $1
+                    ORDER BY expires_at DESC
+                    LIMIT 50
+                """, now)
+                
+                expired_user_groups = await conn.fetch("""
+                    SELECT ug.user_id, ug.group_id, ug.expires_at,
+                           u.username, u.full_name, u.phone
+                    FROM user_groups ug
+                    LEFT JOIN users u ON ug.user_id = u.user_id
+                    WHERE ug.expires_at < $1
+                    ORDER BY ug.expires_at DESC
+                    LIMIT 50
+                """, now)
+                
+                soon_expiring = await conn.fetch("""
+                    SELECT user_id, username, full_name, phone, group_id, expires_at
+                    FROM users
+                    WHERE expires_at IS NOT NULL 
+                          AND expires_at >= $1 
+                          AND expires_at <= $2
+                    ORDER BY expires_at ASC
+                """, now, three_days_later)
+                
+                soon_expiring_groups = await conn.fetch("""
+                    SELECT ug.user_id, ug.group_id, ug.expires_at,
+                           u.username, u.full_name, u.phone
+                    FROM user_groups ug
+                    LEFT JOIN users u ON ug.user_id = u.user_id
+                    WHERE ug.expires_at >= $1 AND ug.expires_at <= $2
+                    ORDER BY ug.expires_at ASC
+                """, now, three_days_later)
+            else:
+                user_ids_in_groups = await conn.fetch("""
+                    SELECT DISTINCT user_id FROM users WHERE group_id = ANY($1)
+                    UNION
+                    SELECT DISTINCT user_id FROM user_groups WHERE group_id = ANY($1)
+                """, allowed_groups)
+                user_ids = [r['user_id'] for r in user_ids_in_groups]
+                
+                if not user_ids:
+                    return await m.answer("✅ Sizning guruhlaringizda hech qanday foydalanuvchi yo'q.")
+                
+                pending_initial = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at,
+                           u.username, u.full_name, u.phone
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'pending' 
+                          AND p.created_at >= $1 
+                          AND p.user_id = ANY($2)
+                          AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
+                    ORDER BY p.created_at DESC
+                """, three_days_ago, user_ids)
+                
+                pending_renewal = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at,
+                           u.username, u.full_name, u.phone
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'pending' 
+                          AND p.created_at >= $1 
+                          AND p.user_id = ANY($2)
+                          AND p.payment_type = 'renewal'
+                    ORDER BY p.created_at DESC
+                """, three_days_ago, user_ids)
+                
+                approved_initial = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at,
+                           u.username, u.full_name, u.phone, u.group_id
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'approved' 
+                          AND p.created_at >= $1
+                          AND p.user_id = ANY($2)
+                          AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
+                          AND (u.expires_at IS NULL OR u.expires_at > $3)
+                    ORDER BY p.created_at DESC
+                """, three_days_ago, user_ids, now)
+                
+                expired_users = await conn.fetch("""
+                    SELECT user_id, username, full_name, phone, group_id, expires_at
+                    FROM users
+                    WHERE expires_at IS NOT NULL 
+                          AND expires_at < $1
+                          AND user_id = ANY($2)
+                    ORDER BY expires_at DESC
+                    LIMIT 50
+                """, now, user_ids)
+                
+                expired_user_groups = await conn.fetch("""
+                    SELECT ug.user_id, ug.group_id, ug.expires_at,
+                           u.username, u.full_name, u.phone
+                    FROM user_groups ug
+                    LEFT JOIN users u ON ug.user_id = u.user_id
+                    WHERE ug.expires_at < $1
+                          AND ug.group_id = ANY($2)
+                    ORDER BY ug.expires_at DESC
+                    LIMIT 50
+                """, now, allowed_groups)
+                
+                soon_expiring = await conn.fetch("""
+                    SELECT user_id, username, full_name, phone, group_id, expires_at
+                    FROM users
+                    WHERE expires_at IS NOT NULL 
+                          AND expires_at >= $1 
+                          AND expires_at <= $2
+                          AND user_id = ANY($3)
+                    ORDER BY expires_at ASC
+                """, now, three_days_later, user_ids)
+                
+                soon_expiring_groups = await conn.fetch("""
+                    SELECT ug.user_id, ug.group_id, ug.expires_at,
+                           u.username, u.full_name, u.phone
+                    FROM user_groups ug
+                    LEFT JOIN users u ON ug.user_id = u.user_id
+                    WHERE ug.expires_at >= $1 
+                          AND ug.expires_at <= $2
+                          AND ug.group_id = ANY($3)
+                    ORDER BY ug.expires_at ASC
+                """, now, three_days_later, allowed_groups)
+        
+        titles = dict(await resolve_group_titles())
+        
+        lines = ["📊 *ADMIN DASHBOARD*\n"]
+        
+        if pending_initial:
+            lines.append(f"🆕 *Yangi to'lovlar (guruhga qo'shilish)* - tasdiq kutmoqda: {len(pending_initial)} ta\n")
+            for row in pending_initial[:10]:
+                uid = row['user_id']
+                fullname = row['full_name'] or "Nomsiz"
+                phone = row['phone'] or "N/A"
+                created_str = (datetime.utcfromtimestamp(row['created_at']) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M")
+                user_link = f"[{fullname}](tg://user?id={uid})"
+                
+                lines.append(f"• {user_link}")
+                lines.append(f"  📞 {phone}")
+                lines.append(f"  📅 {created_str}\n")
+            
+            if len(pending_initial) > 10:
+                lines.append(f"  ... va yana {len(pending_initial)-10} ta\n")
+        else:
+            lines.append("✅ *Yangi to'lovlar (guruhga qo'shilish)* - yo'q\n")
+        
+        lines.append("─" * 30 + "\n")
+        
+        if pending_renewal:
+            lines.append(f"🔄 *Obuna yangilash to'lovlari* - tasdiq kutmoqda: {len(pending_renewal)} ta\n")
+            for row in pending_renewal[:10]:
+                uid = row['user_id']
+                fullname = row['full_name'] or "Nomsiz"
+                phone = row['phone'] or "N/A"
+                created_str = (datetime.utcfromtimestamp(row['created_at']) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M")
+                user_link = f"[{fullname}](tg://user?id={uid})"
+                
+                lines.append(f"• {user_link}")
+                lines.append(f"  📞 {phone}")
+                lines.append(f"  📅 {created_str}\n")
+            
+            if len(pending_renewal) > 10:
+                lines.append(f"  ... va yana {len(pending_renewal)-10} ta\n")
+        else:
+            lines.append("✅ *Obuna yangilash to'lovlari* - yo'q\n")
+        
+        lines.append("─" * 30 + "\n")
+        
+        if approved_initial:
+            lines.append(f"✅ *Tasdiqlangan, guruhga qo'shilish kutilayotgan*: {len(approved_initial)} ta\n")
+            for row in approved_initial[:10]:
+                uid = row['user_id']
+                fullname = row['full_name'] or "Nomsiz"
+                phone = row['phone'] or "N/A"
+                gid = row['group_id']
+                gtitle = titles.get(gid, str(gid)) if gid else "Guruh tanlanmagan"
+                user_link = f"[{fullname}](tg://user?id={uid})"
+                
+                lines.append(f"• {user_link}")
+                lines.append(f"  📞 {phone}")
+                lines.append(f"  👥 {gtitle}\n")
+            
+            if len(approved_initial) > 10:
+                lines.append(f"  ... va yana {len(approved_initial)-10} ta\n")
+        else:
+            lines.append("✅ *Tasdiqlangan, guruhga qo'shilish kutilayotgan* - yo'q\n")
+        
+        lines.append("─" * 30 + "\n")
+        
+        seen_users = set()
+        all_soon_expiring = []
+        
+        for row in soon_expiring:
+            key = (row['user_id'], row['group_id'])
+            if key not in seen_users:
+                seen_users.add(key)
+                all_soon_expiring.append({
+                    'uid': row['user_id'],
+                    'gid': row['group_id'],
+                    'expires_at': row['expires_at'],
+                    'fullname': row['full_name'] or "Nomsiz",
+                    'phone': row['phone'] or "N/A"
+                })
+        
+        for row in soon_expiring_groups:
+            key = (row['user_id'], row['group_id'])
+            if key not in seen_users:
+                seen_users.add(key)
+                all_soon_expiring.append({
+                    'uid': row['user_id'],
+                    'gid': row['group_id'],
+                    'expires_at': row['expires_at'],
+                    'fullname': row['full_name'] or "Nomsiz",
+                    'phone': row['phone'] or "N/A"
+                })
+        
+        all_soon_expiring.sort(key=lambda x: x['expires_at'])
+        
+        if all_soon_expiring:
+            lines.append(f"⏰ *3 kun ichida obunasi tugaydiganlar*: {len(all_soon_expiring)} ta\n")
+            for item in all_soon_expiring[:10]:
+                uid = item['uid']
+                gid = item['gid']
+                expires_at = item['expires_at']
+                fullname = item['fullname']
+                phone = item['phone']
+                
+                exp_str, left_days = human_left(expires_at)
+                gtitle = titles.get(gid, str(gid)) if gid else "N/A"
+                user_link = f"[{fullname}](tg://user?id={uid})"
+                
+                lines.append(f"• {user_link}")
+                lines.append(f"  📞 {phone}")
+                lines.append(f"  👥 {gtitle}")
+                lines.append(f"  ⏳ {exp_str} ({left_days} kun)\n")
+            
+            if len(all_soon_expiring) > 10:
+                lines.append(f"  ... va yana {len(all_soon_expiring)-10} ta\n")
+        else:
+            lines.append("✅ *3 kun ichida obunasi tugaydiganlar* - yo'q\n")
+        
+        lines.append("─" * 30 + "\n")
+        
+        seen_expired = set()
+        all_expired = []
+        
+        for row in expired_users:
+            key = (row['user_id'], row['group_id'])
+            if key not in seen_expired:
+                seen_expired.add(key)
+                all_expired.append({
+                    'uid': row['user_id'],
+                    'gid': row['group_id'],
+                    'expires_at': row['expires_at'],
+                    'fullname': row['full_name'] or "Nomsiz",
+                    'phone': row['phone'] or "N/A"
+                })
+        
+        for row in expired_user_groups:
+            key = (row['user_id'], row['group_id'])
+            if key not in seen_expired:
+                seen_expired.add(key)
+                all_expired.append({
+                    'uid': row['user_id'],
+                    'gid': row['group_id'],
+                    'expires_at': row['expires_at'],
+                    'fullname': row['full_name'] or "Nomsiz",
+                    'phone': row['phone'] or "N/A"
+                })
+        
+        all_expired.sort(key=lambda x: x['expires_at'], reverse=True)
+        
+        if all_expired:
+            lines.append(f"❌ *Obunasi tugagan o'quvchilar*: {len(all_expired)} ta\n")
+            for item in all_expired[:10]:
+                uid = item['uid']
+                gid = item['gid']
+                expires_at = item['expires_at']
+                fullname = item['fullname']
+                phone = item['phone']
+                
+                exp_str, _ = human_left(expires_at)
+                gtitle = titles.get(gid, str(gid)) if gid else "N/A"
+                user_link = f"[{fullname}](tg://user?id={uid})"
+                
+                lines.append(f"• {user_link}")
+                lines.append(f"  📞 {phone}")
+                lines.append(f"  👥 {gtitle}")
+                lines.append(f"  📅 {exp_str}\n")
+            
+            if len(all_expired) > 10:
+                lines.append(f"  ... va yana {len(all_expired)-10} ta\n")
+        else:
+            lines.append("✅ *Obunasi tugagan o'quvchilar* - yo'q\n")
+        
+        await m.answer("\n".join(lines), parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_dashboard: {e}")
+        await m.answer("❌ Xatolik yuz berdi. Qayta urinib ko'ring.")
+
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
     """Barcha guruhlarni ko'rsatish (database'dan) - nomlar bilan."""
