@@ -666,15 +666,31 @@ async def all_members_of_group(gid: int):
     return [(uid, data[0], data[1], data[2], data[3]) for uid, data in merged.items()]
 
 async def expired_users():
+    """Muddati tugagan userlar, lekin FAQAT 24 soatdan eski warning bor yoki hech warning yo'q."""
     now = int(datetime.utcnow().timestamp())
+    threshold_24h = now - (24 * 60 * 60)  # 24 soat oldin
+    
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM users WHERE expires_at>0 AND expires_at<=$1", now)
+        rows = await conn.fetch("""
+            SELECT user_id, group_id, expires_at 
+            FROM users 
+            WHERE expires_at > 0 AND expires_at <= $1
+              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $2)
+        """, now, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 async def expired_user_groups():
+    """Muddati tugagan user_groups, lekin FAQAT 24 soatdan eski warning bor yoki hech warning yo'q."""
     now = int(datetime.utcnow().timestamp())
+    threshold_24h = now - (24 * 60 * 60)  # 24 soat oldin
+    
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id, group_id, expires_at FROM user_groups WHERE expires_at>0 AND expires_at<=$1", now)
+        rows = await conn.fetch("""
+            SELECT user_id, group_id, expires_at 
+            FROM user_groups 
+            WHERE expires_at > 0 AND expires_at <= $1
+              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $2)
+        """, now, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
 async def soon_expiring_users(days: int):
