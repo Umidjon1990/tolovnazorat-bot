@@ -5930,6 +5930,31 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
     
     try:
         await bot.send_message(uid, user_text, reply_markup=renewal_kb)
+        
+        # WARNING YUBORILGANINI DATABASE'GA YOZISH - kuniga 1 marta uchun
+        now = int(datetime.utcnow().timestamp())
+        async with db_pool.acquire() as conn:
+            # users jadvalida bor-yo'qligini tekshirish
+            user_in_users = await conn.fetchval(
+                "SELECT 1 FROM users WHERE user_id = $1 AND group_id = $2", uid, gid
+            )
+            if user_in_users:
+                await conn.execute(
+                    "UPDATE users SET last_warning_sent_at = $1 WHERE user_id = $2 AND group_id = $3",
+                    now, uid, gid
+                )
+            
+            # user_groups jadvalida bor-yo'qligini tekshirish
+            user_in_user_groups = await conn.fetchval(
+                "SELECT 1 FROM user_groups WHERE user_id = $1 AND group_id = $2", uid, gid
+            )
+            if user_in_user_groups:
+                await conn.execute(
+                    "UPDATE user_groups SET last_warning_sent_at = $1 WHERE user_id = $2 AND group_id = $3",
+                    now, uid, gid
+                )
+        
+        logger.info(f"Warning sent to user {uid} for group {gid} - timestamp saved")
     except Exception as e:
         logger.warning(f"Failed to send warning to user {uid}: {e}")
     tag = f"@{_username}" if _username else _full
