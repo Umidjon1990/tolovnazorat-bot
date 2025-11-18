@@ -4442,7 +4442,20 @@ async def on_admin_date_handler(m: Message):
             payment_row = await get_payment(id_value)
             
             if payment_row:
-                # Bu to'lov tasdiqlash
+                # payment_type ni olish
+                _pid, _uid, _status, _, payment_type = payment_row
+                
+                # RENEWAL PAYMENT - sana tanlash kerak emas!
+                if payment_type == 'renewal':
+                    await m.answer(
+                        "⚠️ <b>Xatolik!</b>\n\n"
+                        "Renewal uchun sana tanlash kerak emas.\n"
+                        "Iltimos, to'lovni <b>'Approve (hoziroq)'</b> tugmasi bilan tasdiqlang.",
+                        parse_mode="HTML"
+                    )
+                    return
+                
+                # INITIAL PAYMENT - guruh tanlash
                 iso = start_dt.isoformat()
                 await m.answer("✅ Sana qabul qilindi.\nEndi guruh(lar)ga qo'shish usulini tanlang:", reply_markup=multi_select_entry_kb(id_value, with_date_iso=iso))
             else:
