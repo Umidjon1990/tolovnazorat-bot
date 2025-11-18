@@ -114,6 +114,7 @@ WAIT_CONTRACT_CONFIRM: set[int] = set()
 WAIT_CONTRACT_EDIT: set[int] = set()
 WAIT_PAYMENT_EDIT: set[int] = set()
 WAIT_PAYMENT_PHOTO: set[int] = set()
+WAIT_RENEWAL_RECEIPT: set[int] = set()
 NOT_PAID_COUNTER: dict[tuple[int, int], int] = {}
 # Admin xabarlarini kuzatish (payment_id -> [message_ids])
 ADMIN_MESSAGES: dict[int, list[int]] = {}
@@ -296,6 +297,15 @@ async def db_init():
             except Exception as me:
                 logger.warning(f"Migration warning: {me}")
             
+            # Migration: payments jadvaliga 'payment_type' ustuni qo'shish (initial/renewal farqlash uchun)
+            try:
+                await conn.execute("""
+                    ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT 'initial';
+                """)
+                logger.info("Migration: payments.payment_type column added/verified")
+            except Exception as me:
+                logger.warning(f"Migration warning: {me}")
+            
             # Default shartnoma matnini qo'shish (agar yo'q bo'lsa)
             count = await conn.fetchval("SELECT COUNT(*) FROM contract_templates")
             if count == 0:
@@ -344,11 +354,11 @@ async def db_init():
         logger.error(f"Database initialization failed: {e}")
         raise
 
-async def add_payment(user: Message, file_id: str) -> int:
+async def add_payment(user: Message, file_id: str, payment_type: str = 'initial') -> int:
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO payments(user_id, photo_file, status, created_at) VALUES($1,$2,$3,$4) RETURNING id",
-            user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp())
+            "INSERT INTO payments(user_id, photo_file, status, created_at, payment_type) VALUES($1,$2,$3,$4,$5) RETURNING id",
+            user.from_user.id, file_id, "pending", int(datetime.utcnow().timestamp()), payment_type
         )
         return int(row['id'])
 
@@ -360,6 +370,15 @@ async def get_payment(pid: int):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT id, user_id, status, photo_file FROM payments WHERE id=$1", pid)
         return (row['id'], row['user_id'], row['status'], row['photo_file']) if row else None
+
+async def has_pending_renewal(user_id: int) -> bool:
+    """User'ning pending renewal payment'i bormi?"""
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM payments WHERE user_id=$1 AND status='pending' AND payment_type='renewal' LIMIT 1",
+            user_id
+        )
+        return row is not None
 
 async def upsert_user(uid: int, username: str, full_name: str, group_id: int, expires_at: int, phone: Optional[str] = None, agreed_at: Optional[int] = None):
     async with db_pool.acquire() as conn:
@@ -1457,6 +1476,64 @@ async def cb_course_select(c: CallbackQuery):
 @dp.message(Command("myid"))
 async def cmd_myid(m: Message):
     await m.answer(f"🆔 Sizning Telegram ID: `{m.from_user.id}`", parse_mode="Markdown")
+
+@dp.message(Command("renew"))
+async def cmd_renew(m: Message):
+    """Obunani yangilash (to'lov qilish)"""
+    uid = m.from_user.id
+    
+    # 1. User ro'yxatdan o'tganligini tekshirish
+    user = await get_user(uid)
+    if not user:
+        return await m.answer(
+            "❌ Siz ro'yxatdan o'tmagansiz.\n\n"
+            "Iltimos, avval /start buyrug'i orqali ro'yxatdan o'ting."
+        )
+    
+    # 2. Pending renewal bor bo'lsa, bloklash
+    if await has_pending_renewal(uid):
+        return await m.answer(
+            "⏳ Sizning yangilanish to'lovingiz hali ko'rib chiqilmoqda.\n\n"
+            "Iltimos, admin tasdiqini kuting."
+        )
+    
+    # 3. To'lov ma'lumotini ko'rsatish
+    try:
+        payment_settings = await get_payment_settings()
+        if not payment_settings:
+            return await m.answer(
+                "❌ To'lov ma'lumotlari topilmadi.\n\n"
+                "Iltimos, admin bilan bog'laning."
+            )
+        
+        bank = payment_settings['bank_name']
+        card = payment_settings['card_number']
+        amount = payment_settings['amount']
+        additional = payment_settings['additional_info'] or ""
+        
+        msg = (
+            "💳 <b>OBUNANI YANGILASH</b>\n\n"
+            f"🏦 Bank: <b>{bank}</b>\n"
+            f"💳 Karta raqami: <code>{card}</code>\n"
+            f"💰 Summa: <b>{amount} so'm</b>\n"
+        )
+        if additional:
+            msg += f"\n📝 Qo'shimcha: {additional}\n"
+        
+        msg += (
+            "\n📸 <b>To'lov chekini yuboring:</b>\n"
+            "To'lovni amalga oshirgandan so'ng, chek rasmini shu chatga yuboring."
+        )
+        
+        await m.answer(msg, parse_mode="HTML")
+        
+        # 4. State'ni o'rnatish
+        WAIT_RENEWAL_RECEIPT.add(uid)
+        logger.info(f"User {uid} started renewal process")
+        
+    except Exception as e:
+        logger.error(f"Error in cmd_renew: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
 
 @dp.message(Command("expiring"))
 async def cmd_expiring(m: Message):
@@ -4319,15 +4396,72 @@ async def cb_pay_link(c: CallbackQuery):
 
 @dp.message(F.photo)
 async def on_photo(m: Message):
-    # To'lov cheki kutilayotganlarni tekshirish
-    if m.from_user.id not in WAIT_PAYMENT_PHOTO:
+    uid = m.from_user.id
+    
+    # 1. Yangilanish cheki (renewal receipt)
+    if uid in WAIT_RENEWAL_RECEIPT:
+        try:
+            WAIT_RENEWAL_RECEIPT.discard(uid)
+            
+            # To'lovni database'ga qo'shish (renewal type)
+            pid = await add_payment(m, m.photo[-1].file_id, payment_type='renewal')
+            await m.answer(
+                "✅ <b>Yangilanish to'lovi qabul qilindi!</b>\n\n"
+                "⏳ Admin tekshiradi va tasdiqlashini kuting.\n"
+                "Tez orada xabar beramiz!",
+                parse_mode="HTML"
+            )
+            
+            # User ma'lumotlarini olish
+            user_row = await get_user(uid)
+            phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
+            fullname = user_row[4] if user_row and len(user_row) > 4 else "Noma'lum"
+            
+            # Telegram'dan profil nomini olish
+            username, full_name = await fetch_user_profile(uid)
+            chat_link = f"📧 [{username}](tg://user?id={uid})" if username else f"📧 [Chat ochish](tg://user?id={uid})"
+            
+            kb = approve_keyboard(pid)
+            caption = (
+                f"🔄 *YANGILANISH TO'LOVI*\n\n"
+                f"👤 {fullname}\n"
+                f"{chat_link}\n"
+                f"📱 Telefon: {phone}\n"
+                f"🆔 ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`\n"
+                f"📅 Vaqt: {(datetime.utcnow() + TZ_OFFSET).strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"♻️ Bu obunani yangilash to'lovi"
+            )
+            
+            # Admin xabarlarini kuzatish
+            if pid not in ADMIN_MESSAGES:
+                ADMIN_MESSAGES[pid] = []
+            
+            # Barcha adminlarga xabar yuborish
+            for aid in ADMIN_IDS:
+                try:
+                    msg = await bot.send_photo(aid, m.photo[-1].file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+                    ADMIN_MESSAGES[pid].append(msg.message_id)
+                except Exception as e:
+                    logger.warning(f"Failed to send renewal payment notification to admin {aid}: {e}")
+            
+            logger.info(f"User {uid} uploaded renewal payment photo, payment ID: {pid}")
+            return
+            
+        except Exception as e:
+            logger.error(f"Error in renewal photo handler: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+            return
+    
+    # 2. Dastlabki to'lov cheki (initial payment)
+    if uid not in WAIT_PAYMENT_PHOTO:
         return
     
     try:
-        WAIT_PAYMENT_PHOTO.discard(m.from_user.id)
+        WAIT_PAYMENT_PHOTO.discard(uid)
         
-        # To'lovni database'ga qo'shish
-        pid = await add_payment(m, m.photo[-1].file_id)
+        # To'lovni database'ga qo'shish (initial type)
+        pid = await add_payment(m, m.photo[-1].file_id, payment_type='initial')
         await m.answer(
             "✅ <b>To'lov cheki qabul qilindi!</b>\n\n"
             "⏳ Admin tekshiradi va tasdiqlashini kuting.\n"
@@ -5493,13 +5627,13 @@ async def _warn_and_buttons(uid: int, gid: int, exp_at: int, reason: str):
             "⏰ Obunangiz yaqin kunlarda tugaydi.\n"
             f"⏳ Tugash sanasi: {exp_str}\n"
             f"📆 Qolgan kun: {max(left,0)}\n\n"
-            "Iltimos, to'lovni vaqtida yangilang va chekni shu botga yuboring."
+            "💳 Obunani yangilash uchun /renew buyrug'ini yuboring."
         )
     else:
         user_text = (
             "⚠️ Obunangiz muddati tugagan.\n"
-            f"⏳ Tugash sanasi: {exp_str}\n"
-            "Iltimos, to'lovni yangilang va chekni shu botga yuboring."
+            f"⏳ Tugash sanasi: {exp_str}\n\n"
+            "💳 Obunani yangilash uchun /renew buyrug'ini yuboring."
         )
     try:
         await bot.send_message(uid, user_text)
