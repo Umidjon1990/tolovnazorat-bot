@@ -427,6 +427,57 @@ async def update_user_agreed(uid: int, ts: int):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET agreed_at=$1 WHERE user_id=$2", ts, uid)
 
+async def approve_renewal_payment(pid: int, uid: int, admin_id: int):
+    """
+    Renewal payment'ni approve qilish - barcha hozirgi obunalarni +30 kun uzaytirish.
+    Link yuborilmaydi, faqat hozirgi obunalar uzaytiriladi.
+    """
+    now = int(datetime.utcnow().timestamp())
+    new_exp = int((datetime.utcnow() + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
+    
+    updated_groups = []
+    
+    async with db_pool.acquire() as conn:
+        # 1. users jadvalidagi asosiy obunani uzaytirish
+        user_row = await conn.fetchrow(
+            "SELECT group_id, expires_at FROM users WHERE user_id = $1", uid
+        )
+        if user_row and user_row['group_id']:
+            gid = user_row['group_id']
+            current_exp = user_row['expires_at'] or now
+            # Hozirgi muddatdan +30 kun qo'shish
+            final_exp = max(current_exp, now) + (SUBSCRIPTION_DAYS * 86400)
+            await conn.execute(
+                "UPDATE users SET expires_at = $1 WHERE user_id = $2",
+                final_exp, uid
+            )
+            updated_groups.append((gid, final_exp))
+        
+        # 2. user_groups jadvalidagi barcha obunalarni uzaytirish
+        user_groups_rows = await conn.fetch(
+            "SELECT group_id, expires_at FROM user_groups WHERE user_id = $1", uid
+        )
+        for row in user_groups_rows:
+            gid = row['group_id']
+            current_exp = row['expires_at'] or now
+            # Hozirgi muddatdan +30 kun qo'shish
+            final_exp = max(current_exp, now) + (SUBSCRIPTION_DAYS * 86400)
+            await conn.execute(
+                "UPDATE user_groups SET expires_at = $1 WHERE user_id = $2 AND group_id = $3",
+                final_exp, uid, gid
+            )
+            # Agar users'da yo'q bo'lsa, faqat user_groups'ga qo'shamiz
+            if not any(g[0] == gid for g in updated_groups):
+                updated_groups.append((gid, final_exp))
+        
+        # 3. Payment status'ni approved qilish
+        await conn.execute(
+            "UPDATE payments SET status = $1, admin_id = $2 WHERE id = $3",
+            'approved', admin_id, pid
+        )
+    
+    return updated_groups
+
 async def update_user_course(uid: int, course_name: str):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET course_name=$1 WHERE user_id=$2", course_name, uid)
@@ -4725,9 +4776,66 @@ async def cb_approve_now(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, _uid, _status, _, _ = row  # payment_type ignored
+        _pid, _uid, _status, _, payment_type = row
         if _status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
+        
+        # RENEWAL PAYMENT - barcha obunalarni uzaytirish, guruh tanlash KERAK EMAS
+        if payment_type == 'renewal':
+            updated_groups = await approve_renewal_payment(pid, _uid, c.from_user.id)
+            
+            if not updated_groups:
+                return await c.answer("⚠️ User'ning hech qanday obunasi topilmadi!", show_alert=True)
+            
+            # User'ga xabar yuborish
+            user_row = await get_user(_uid)
+            username, full_name = await fetch_user_profile(_uid)
+            
+            titles = dict(await resolve_group_titles())
+            group_list = []
+            for gid, final_exp in updated_groups:
+                exp_str, _ = human_left(final_exp)
+                group_name = titles.get(gid, f"Guruh {gid}")
+                group_list.append(f"🏷 {group_name} - {exp_str}")
+            
+            try:
+                await bot.send_message(
+                    _uid,
+                    f"✅ <b>Obuna yangilandi!</b>\n\n"
+                    f"Admin to'lovingizni tasdiqladi va obunalaringiz uzaytirildi:\n\n" +
+                    "\n".join(group_list) +
+                    f"\n\n💰 +{SUBSCRIPTION_DAYS} kun qo'shildi!\n"
+                    f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
+                    parse_mode="HTML",
+                    reply_markup=user_reply_keyboard()
+                )
+            except Exception as e:
+                logger.warning(f"Failed to notify user {_uid}: {e}")
+            
+            # Admin'ga xabar yuborish
+            await c.message.answer(
+                f"✅ <b>Obuna yangilandi!</b>\n\n"
+                f"👤 {full_name} (@{username or _uid})\n"
+                f"🆔 ID: <code>{_uid}</code>\n\n"
+                f"Uzaytirilgan guruhlar:\n" +
+                "\n".join(group_list),
+                parse_mode="HTML"
+            )
+            
+            # Admin xabarlarini o'chirish
+            if pid in ADMIN_MESSAGES:
+                for msg_id in ADMIN_MESSAGES[pid]:
+                    try:
+                        await bot.delete_message(c.message.chat.id, msg_id)
+                    except Exception:
+                        pass
+                del ADMIN_MESSAGES[pid]
+            
+            await c.answer("✅ Obuna yangilandi!")
+            logger.info(f"Renewal approved for user {_uid}, payment {pid}, {len(updated_groups)} groups extended")
+            return
+        
+        # INITIAL PAYMENT - guruh tanlash kerak
         if not GROUP_IDS:
             return await c.answer("ENV: PRIVATE_GROUP_ID bo'sh. Guruh chat_id larini kiriting.", show_alert=True)
         msg = await c.message.answer("🧭 Qanday qo'shamiz?", reply_markup=multi_select_entry_kb(pid, with_date_iso=None))
@@ -4958,9 +5066,19 @@ async def cb_approve_date(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, _uid, _status, _, _ = row  # payment_type ignored
+        _pid, _uid, _status, _, payment_type = row
         if _status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
+        
+        # RENEWAL PAYMENT - sana tanlash kerak emas, to'g'ridan-to'g'ri approve
+        if payment_type == 'renewal':
+            return await c.answer(
+                "⚠️ Renewal uchun sana tanlash kerak emas!\n\n"
+                "Iltimos, 'Approve (hoziroq)' tugmasini bosing.",
+                show_alert=True
+            )
+        
+        # INITIAL PAYMENT - sana tanlash
         WAIT_DATE_FOR[c.from_user.id] = pid
         msg = await c.message.answer("🗓 Boshlanish sanasini kiriting: YYYY-MM-DD (masalan 2025-10-01)")
         if pid in ADMIN_MESSAGES:
