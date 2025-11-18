@@ -4517,7 +4517,7 @@ async def cb_approve_now(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, _uid, _status, _ = row
+        _pid, _uid, _status, _, _ = row  # payment_type ignored
         if _status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         if not GROUP_IDS:
@@ -4750,7 +4750,7 @@ async def cb_approve_date(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, _uid, _status, _ = row
+        _pid, _uid, _status, _, _ = row  # payment_type ignored
         if _status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         WAIT_DATE_FOR[c.from_user.id] = pid
@@ -5070,7 +5070,7 @@ async def cb_pick_group(c: CallbackQuery):
         row = await get_payment(pid)
         if not row:
             return await c.answer("Payment topilmadi", show_alert=True)
-        _pid, user_id, status, photo_file_id = row
+        _pid, user_id, status, photo_file_id, _ = row  # payment_type ignored
         if status == "approved":
             return await c.answer("Bu to'lov allaqachon tasdiqlangan.", show_alert=True)
         start_dt = datetime.utcnow()
@@ -5420,7 +5420,7 @@ async def cb_reject(c: CallbackQuery):
         pid = int(c.data.split(":")[1])
         row = await get_payment(pid)
         if row:
-            _pid, user_id, _status, _ = row
+            _pid, user_id, _status, _, _ = row  # payment_type ignored
             user_row = await get_user(user_id)
             username, full_name = await fetch_user_profile(user_id)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
