@@ -232,6 +232,7 @@ CREATE TABLE IF NOT EXISTS payment_settings(
     card_number TEXT NOT NULL,
     amount TEXT NOT NULL,
     additional_info TEXT,
+    video_link TEXT,
     updated_at BIGINT NOT NULL,
     updated_by BIGINT
 );
@@ -320,6 +321,15 @@ async def db_init():
                     ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT 'initial';
                 """)
                 logger.info("Migration: payments.payment_type column added/verified")
+            except Exception as me:
+                logger.warning(f"Migration warning: {me}")
+            
+            # Migration: payment_settings jadvaliga 'video_link' ustuni qo'shish (YouTube tutorial uchun)
+            try:
+                await conn.execute("""
+                    ALTER TABLE payment_settings ADD COLUMN IF NOT EXISTS video_link TEXT;
+                """)
+                logger.info("Migration: payment_settings.video_link column added/verified")
             except Exception as me:
                 logger.warning(f"Migration warning: {me}")
             
@@ -504,18 +514,18 @@ async def get_payment_settings():
     """To'lov ma'lumotlarini olish."""
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT bank_name, card_number, amount, additional_info FROM payment_settings ORDER BY id DESC LIMIT 1"
+            "SELECT bank_name, card_number, amount, additional_info, video_link FROM payment_settings ORDER BY id DESC LIMIT 1"
         )
         return row if row else None
 
-async def update_payment_settings(bank_name: str, card_number: str, amount: str, additional_info: str, admin_id: int):
+async def update_payment_settings(bank_name: str, card_number: str, amount: str, additional_info: str, video_link: str, admin_id: int):
     """To'lov ma'lumotlarini yangilash."""
     now = int(datetime.utcnow().timestamp())
     async with db_pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO payment_settings(bank_name, card_number, amount, additional_info, updated_at, updated_by)
-            VALUES($1, $2, $3, $4, $5, $6)
-        """, bank_name, card_number, amount, additional_info, now, admin_id)
+            INSERT INTO payment_settings(bank_name, card_number, amount, additional_info, video_link, updated_at, updated_by)
+            VALUES($1, $2, $3, $4, $5, $6, $7)
+        """, bank_name, card_number, amount, additional_info, video_link, now, admin_id)
 
 async def load_groups_from_db() -> list[int]:
     """Database'dan guruhlar ro'yxatini yuklash."""
@@ -1653,6 +1663,7 @@ async def btn_payment(m: Message):
         card = payment_settings['card_number']
         amount = payment_settings['amount']
         additional = payment_settings['additional_info'] or ""
+        video_link = payment_settings.get('video_link', '') or ""
         
         msg = (
             "💳 <b>YANGI TO'LOV</b>\n\n"
@@ -1662,6 +1673,9 @@ async def btn_payment(m: Message):
         )
         if additional:
             msg += f"\n📝 Qo'shimcha: {additional}\n"
+        
+        if video_link:
+            msg += f"\n🎥 <b>Video yo'riqnoma:</b> {video_link}\n"
         
         msg += (
             "\n📸 <b>To'lov chekini yuboring:</b>\n"
@@ -1712,6 +1726,7 @@ async def btn_renew(m: Message):
         card = payment_settings['card_number']
         amount = payment_settings['amount']
         additional = payment_settings['additional_info'] or ""
+        video_link = payment_settings.get('video_link', '') or ""
         
         msg = (
             "💳 <b>OBUNANI YANGILASH</b>\n\n"
@@ -1721,6 +1736,9 @@ async def btn_renew(m: Message):
         )
         if additional:
             msg += f"\n📝 Qo'shimcha: {additional}\n"
+        
+        if video_link:
+            msg += f"\n🎥 <b>Video yo'riqnoma:</b> {video_link}\n"
         
         msg += (
             "\n📸 <b>To'lov chekini yuboring:</b>\n"
@@ -1777,6 +1795,7 @@ async def cb_start_renewal(c: CallbackQuery):
         card = payment_settings['card_number']
         amount = payment_settings['amount']
         additional = payment_settings['additional_info'] or ""
+        video_link = payment_settings.get('video_link', '') or ""
         
         msg = (
             "💳 <b>OBUNANI YANGILASH</b>\n\n"
@@ -1786,6 +1805,9 @@ async def cb_start_renewal(c: CallbackQuery):
         )
         if additional:
             msg += f"\n📝 Qo'shimcha: {additional}\n"
+        
+        if video_link:
+            msg += f"\n🎥 <b>Video yo'riqnoma:</b> {video_link}\n"
         
         msg += (
             "\n📸 <b>To'lov chekini yuboring:</b>\n"
@@ -2563,13 +2585,15 @@ async def cmd_edit_payment(m: Message):
             card = payment_settings['card_number']
             amount = payment_settings['amount']
             additional = payment_settings.get('additional_info', '') or 'Yo\'q'
+            video = payment_settings.get('video_link', '') or 'Yo\'q'
             
             current_info = (
                 f"💳 <b>Hozirgi to'lov ma'lumotlari:</b>\n\n"
                 f"🏦 Bank: {bank}\n"
                 f"💰 Summa: {amount}\n"
                 f"📋 Karta raqam: {card}\n"
-                f"📝 Qo'shimcha: {additional}\n\n"
+                f"📝 Qo'shimcha: {additional}\n"
+                f"🎥 Video yo'riqnoma: {video}\n\n"
             )
         else:
             current_info = "💳 <b>To'lov ma'lumotlari hali kiritilmagan.</b>\n\n"
@@ -2581,12 +2605,14 @@ async def cmd_edit_payment(m: Message):
             f"<code>Bank nomi\n"
             f"Karta raqam\n"
             f"Summa\n"
-            f"Qo'shimcha ma'lumot (ixtiyoriy)</code>\n\n"
+            f"Qo'shimcha ma'lumot (ixtiyoriy)\n"
+            f"YouTube video link (ixtiyoriy)</code>\n\n"
             f"<b>Misol:</b>\n"
             f"<code>Xalq Banki\n"
             f"8600 1234 5678 9012\n"
             f"150,000 so'm\n"
-            f"To'lov amalga oshirilgandan keyin chekni yuboring</code>",
+            f"To'lov amalga oshirilgandan keyin chekni yuboring\n"
+            f"https://youtu.be/dQw4w9WgXcQ</code>",
             parse_mode="HTML"
         )
         
@@ -4211,13 +4237,15 @@ async def admin_edit_payment_button(m: Message):
             card = payment_settings['card_number']
             amount = payment_settings['amount']
             additional = payment_settings.get('additional_info', '') or 'Yo\'q'
+            video = payment_settings.get('video_link', '') or 'Yo\'q'
             
             current_info = (
                 f"💳 <b>Hozirgi to'lov ma'lumotlari:</b>\n\n"
                 f"🏦 Bank: {bank}\n"
                 f"💰 Summa: {amount}\n"
                 f"📋 Karta raqam: {card}\n"
-                f"📝 Qo'shimcha: {additional}"
+                f"📝 Qo'shimcha: {additional}\n"
+                f"🎥 Video: {video}"
             )
         else:
             current_info = "💳 <b>To'lov ma'lumotlari hali kiritilmagan.</b>"
@@ -4310,7 +4338,8 @@ async def on_admin_date_handler(m: Message):
                     "<code>Bank nomi\n"
                     "Karta raqam\n"
                     "Summa\n"
-                    "Qo'shimcha (ixtiyoriy)</code>",
+                    "Qo'shimcha (ixtiyoriy)\n"
+                    "Video link (ixtiyoriy)</code>",
                     parse_mode="HTML"
                 )
             
@@ -4318,12 +4347,13 @@ async def on_admin_date_handler(m: Message):
             card_number = lines[1].strip()
             amount = lines[2].strip()
             additional_info = lines[3].strip() if len(lines) > 3 else ""
+            video_link = lines[4].strip() if len(lines) > 4 else ""
             
             if not bank_name or not card_number or not amount:
                 return await m.answer("❗ Bank nomi, karta raqam va summa bo'sh bo'lmasligi kerak!")
             
             # To'lov ma'lumotlarini yangilash
-            await update_payment_settings(bank_name, card_number, amount, additional_info, m.from_user.id)
+            await update_payment_settings(bank_name, card_number, amount, additional_info, video_link, m.from_user.id)
             WAIT_PAYMENT_EDIT.discard(m.from_user.id)
             
             await m.answer(
@@ -4331,12 +4361,13 @@ async def on_admin_date_handler(m: Message):
                 f"🏦 Bank: {bank_name}\n"
                 f"💰 Summa: {amount}\n"
                 f"📋 Karta: {card_number}\n"
-                + (f"📝 Qo'shimcha: {additional_info}\n" if additional_info else "") +
+                + (f"📝 Qo'shimcha: {additional_info}\n" if additional_info else "")
+                + (f"🎥 Video: {video_link}\n" if video_link else "") +
                 "\nEndi o'quvchilar yangi to'lov ma'lumotlarini ko'rishadi.",
                 parse_mode="HTML"
             )
             
-            logger.info(f"Admin {m.from_user.id} updated payment settings")
+            logger.info(f"Admin {m.from_user.id} updated payment settings with video_link={bool(video_link)}")
             
         except Exception as e:
             logger.error(f"Error updating payment settings: {e}")
