@@ -1967,27 +1967,7 @@ async def cmd_dashboard(m: Message):
                     ORDER BY ug.expires_at ASC
                 """, now, three_days_later)
             else:
-                user_ids_in_groups = await conn.fetch("""
-                    SELECT DISTINCT user_id FROM users WHERE group_id = ANY($1)
-                    UNION
-                    SELECT DISTINCT user_id FROM user_groups WHERE group_id = ANY($1)
-                """, allowed_groups)
-                user_ids = [r['user_id'] for r in user_ids_in_groups]
-                
-                if not user_ids:
-                    return await m.answer("✅ Sizning guruhlaringizda hech qanday foydalanuvchi yo'q.")
-                
-                pending_initial = await conn.fetch("""
-                    SELECT p.id, p.user_id, p.created_at,
-                           u.username, u.full_name, u.phone
-                    FROM payments p
-                    LEFT JOIN users u ON p.user_id = u.user_id
-                    WHERE p.status = 'pending' 
-                          AND p.created_at >= $1 
-                          AND p.user_id = ANY($2)
-                          AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
-                    ORDER BY p.created_at DESC
-                """, three_days_ago, user_ids)
+                pending_initial = []
                 
                 pending_renewal = await conn.fetch("""
                     SELECT p.id, p.user_id, p.created_at,
@@ -1996,10 +1976,13 @@ async def cmd_dashboard(m: Message):
                     LEFT JOIN users u ON p.user_id = u.user_id
                     WHERE p.status = 'pending' 
                           AND p.created_at >= $1 
-                          AND p.user_id = ANY($2)
                           AND p.payment_type = 'renewal'
+                          AND (
+                              EXISTS (SELECT 1 FROM users WHERE user_id = p.user_id AND group_id = ANY($2))
+                              OR EXISTS (SELECT 1 FROM user_groups WHERE user_id = p.user_id AND group_id = ANY($2))
+                          )
                     ORDER BY p.created_at DESC
-                """, three_days_ago, user_ids)
+                """, three_days_ago, allowed_groups)
                 
                 approved_initial = await conn.fetch("""
                     SELECT p.id, p.user_id, p.created_at,
@@ -2008,21 +1991,21 @@ async def cmd_dashboard(m: Message):
                     LEFT JOIN users u ON p.user_id = u.user_id
                     WHERE p.status = 'approved' 
                           AND p.created_at >= $1
-                          AND p.user_id = ANY($2)
                           AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
-                          AND (u.expires_at IS NULL OR u.expires_at > $3)
+                          AND (u.expires_at IS NULL OR u.expires_at > $2)
+                          AND u.group_id = ANY($3)
                     ORDER BY p.created_at DESC
-                """, three_days_ago, user_ids, now)
+                """, three_days_ago, now, allowed_groups)
                 
                 expired_users = await conn.fetch("""
                     SELECT user_id, username, full_name, phone, group_id, expires_at
                     FROM users
                     WHERE expires_at IS NOT NULL 
                           AND expires_at < $1
-                          AND user_id = ANY($2)
+                          AND group_id = ANY($2)
                     ORDER BY expires_at DESC
                     LIMIT 50
-                """, now, user_ids)
+                """, now, allowed_groups)
                 
                 expired_user_groups = await conn.fetch("""
                     SELECT ug.user_id, ug.group_id, ug.expires_at,
@@ -2041,9 +2024,9 @@ async def cmd_dashboard(m: Message):
                     WHERE expires_at IS NOT NULL 
                           AND expires_at >= $1 
                           AND expires_at <= $2
-                          AND user_id = ANY($3)
+                          AND group_id = ANY($3)
                     ORDER BY expires_at ASC
-                """, now, three_days_later, user_ids)
+                """, now, three_days_later, allowed_groups)
                 
                 soon_expiring_groups = await conn.fetch("""
                     SELECT ug.user_id, ug.group_id, ug.expires_at,
