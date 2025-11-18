@@ -21,6 +21,7 @@ The system employs a multi-tenant architecture, allowing multiple independent ad
 
 ## UI/UX Decisions
 - **Admin Panel**: Features a persistent reply keyboard with role-based buttons for Super Admins and Regular Admins, streamlining management tasks.
+- **User Interface**: Persistent reply keyboard with 2 buttons for all users: "💳 To'lov qilish" (new group payment) and "♻️ Obunani yangilash" (subscription renewal). Buttons remain visible after every message for easy access.
 - **Message Clarity**: Uses smart chat links for clickable user profiles and automatic cleanup of bot messages in admin chats after actions to maintain tidiness.
 - **Smart Group Name Resolution**: Prioritizes database names, then Telegram API, then group ID, automatically updating database with real group names for improved readability.
 
@@ -28,7 +29,8 @@ The system employs a multi-tenant architecture, allowing multiple independent ad
 - **Bot Framework**: Built with `aiogram 3.x` for asynchronous, type-safe Telegram Bot API interactions, featuring a Dispatcher for routing, Filters, and State management.
 - **Data Storage**: PostgreSQL with `asyncpg` for production-ready, performant data persistence. Key tables include `users`, `payments`, `user_groups`, `groups`, `admins`, and `payment_settings` for dynamic configuration.
 - **Access Control**: Multi-tier admin system (`ADMIN_IDS` for Super Admins, database-managed Regular Admins) with role-based permissions and auto-deactivation for expired admin accounts.
-- **Subscription Renewal**: Supports renewal via `/renew` command or one-click inline buttons, processing payments, and extending existing subscriptions by 30 days. `payment_type` column differentiates initial payments from renewals.
+- **Subscription Renewal**: Supports renewal via `/renew` command, persistent reply keyboard buttons ("♻️ Obunani yangilash"), or inline buttons in expiry warnings. Processing payments extends existing subscriptions by 30 days. `payment_type` column differentiates initial payments from renewals.
+- **Dual Payment Flow**: "💳 To'lov qilish" button initiates new group registration, while "♻️ Obunani yangilash" button extends current subscriptions by +30 days without creating new invite links.
 - **Payment-First Registration**: Users register without prior group membership, submit payment receipts, and receive admin approval before getting a 24-hour invite link.
 - **Dynamic Settings**: Admins can update payment information and contract templates dynamically via bot commands, stored in the database.
 - **Automated Processes**: Includes auto-kick for expired members, 3-day expiry reminders to users and admins, and auto-deactivation of expired admin accounts.
