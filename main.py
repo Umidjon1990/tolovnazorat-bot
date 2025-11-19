@@ -696,10 +696,11 @@ async def expired_user_groups():
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT user_id, group_id, expires_at 
-            FROM user_groups 
-            WHERE expires_at > 0 AND expires_at <= $1
-              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $2)
+            SELECT ug.user_id, ug.group_id, ug.expires_at 
+            FROM user_groups ug
+            INNER JOIN groups g ON ug.group_id = g.group_id
+            WHERE ug.expires_at > 0 AND ug.expires_at <= $1
+              AND (ug.last_warning_sent_at IS NULL OR ug.last_warning_sent_at < $2)
         """, now, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
@@ -726,10 +727,11 @@ async def soon_expiring_user_groups(days: int):
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT user_id, group_id, expires_at 
-            FROM user_groups 
-            WHERE expires_at > $1 AND expires_at <= $2
-              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $3)
+            SELECT ug.user_id, ug.group_id, ug.expires_at 
+            FROM user_groups ug
+            INNER JOIN groups g ON ug.group_id = g.group_id
+            WHERE ug.expires_at > $1 AND ug.expires_at <= $2
+              AND (ug.last_warning_sent_at IS NULL OR ug.last_warning_sent_at < $3)
         """, now, upper, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
@@ -6542,7 +6544,7 @@ async def cb_group_delete_confirm(c: CallbackQuery):
     try:
         gid = int(c.data.split(":")[1])
         
-        # Guruh nomini olish
+        # Guruh nomini olish va barcha ma'lumotlarni o'chirish (transaction bilan)
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow("SELECT name FROM groups WHERE group_id = $1", gid)
             if not row:
@@ -6550,16 +6552,33 @@ async def cb_group_delete_confirm(c: CallbackQuery):
             
             group_name = row['name']
             
-            # Guruhni o'chirish
-            await conn.execute("DELETE FROM groups WHERE group_id = $1", gid)
+            # TRANSACTION: Barcha o'chirish operatsiyalari bitta transactionda
+            async with conn.transaction():
+                # 1. Avval user_groups sonini sanash
+                user_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM user_groups WHERE group_id = $1", gid
+                )
+                
+                # 2. User_groups - bu guruhga obuna bo'lgan userlarni o'chirish
+                await conn.execute("DELETE FROM user_groups WHERE group_id = $1", gid)
+                
+                # 3. Admin_groups - bu guruhga tayinlangan adminlarni o'chirish
+                await conn.execute("DELETE FROM admin_groups WHERE group_id = $1", gid)
+                
+                # 4. Groups - guruhning o'zini o'chirish
+                await conn.execute("DELETE FROM groups WHERE group_id = $1", gid)
+                
+                logger.info(f"Group {gid} deleted: removed {user_count or 0} user subscriptions")
             
-            # Admin_groups jadvalidan ham o'chirish
-            await conn.execute("DELETE FROM admin_groups WHERE group_id = $1", gid)
+            # Transaction commit bo'lgandan keyin darhol cache yangilash
+            # (connection hali ochiq - connection pool window minimallashtirilgan)
+            rows = await conn.fetch("SELECT group_id FROM groups ORDER BY id")
+            new_group_ids = [row['group_id'] for row in rows]
         
-        # GROUP_IDS global o'zgaruvchisidan ham o'chirish
+        # GROUP_IDS global cache'ni yangilash
         global GROUP_IDS
-        if gid in GROUP_IDS:
-            GROUP_IDS.remove(gid)
+        GROUP_IDS = new_group_ids
+        logger.info(f"GROUP_IDS refreshed after deletion: {GROUP_IDS}")
         
         await c.message.edit_text(
             f"✅ <b>Guruh o'chirildi!</b>\n\n"
