@@ -6562,8 +6562,12 @@ async def cb_group_delete_confirm(c: CallbackQuery):
                 # 2. User_groups - bu guruhga obuna bo'lgan userlarni o'chirish
                 await conn.execute("DELETE FROM user_groups WHERE group_id = $1", gid)
                 
-                # 3. Admin_groups - bu guruhga tayinlangan adminlarni o'chirish
-                await conn.execute("DELETE FROM admin_groups WHERE group_id = $1", gid)
+                # 3. Adminlarning managed_groups arrayidan bu guruhni o'chirish
+                await conn.execute("""
+                    UPDATE admins 
+                    SET managed_groups = array_remove(managed_groups, $1)
+                    WHERE $1 = ANY(managed_groups)
+                """, gid)
                 
                 # 4. Groups - guruhning o'zini o'chirish
                 await conn.execute("DELETE FROM groups WHERE group_id = $1", gid)
