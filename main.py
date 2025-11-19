@@ -2240,7 +2240,7 @@ async def cmd_payments(m: Message):
 
 @dp.callback_query(F.data == "pay_pending_initial")
 async def cb_pending_initial(callback: CallbackQuery):
-    """Yangi userlar - guruhga qo'shilish kutilmoqda (faqat Super Admin)."""
+    """Yangi userlar - guruhga qo'shilish kutilmoqda (faqat Super Admin) - cheki rasm bilan."""
     admin_id = callback.from_user.id
     is_super = is_super_admin(admin_id)
     
@@ -2248,45 +2248,70 @@ async def cb_pending_initial(callback: CallbackQuery):
         return await callback.answer("⛔ Faqat Super Admin yangi userlarni ko'rishi mumkin!", show_alert=True)
     
     try:
+        await callback.message.delete()
         three_days_ago = int(datetime.utcnow().timestamp()) - (3 * 24 * 60 * 60)
         
         async with db_pool.acquire() as conn:
             payments = await conn.fetch("""
-                SELECT p.id, p.user_id, p.created_at,
-                       u.username, u.full_name, u.phone
+                SELECT p.id, p.user_id, p.photo_file, p.created_at,
+                       u.username, u.full_name, u.phone, u.agreed_at, u.group_id
                 FROM payments p
                 LEFT JOIN users u ON p.user_id = u.user_id
                 WHERE p.status = 'pending' 
                       AND p.created_at >= $1
                       AND (p.payment_type = 'initial' OR p.payment_type IS NULL)
                 ORDER BY p.created_at DESC
-                LIMIT 20
+                LIMIT 10
             """, three_days_ago)
         
         if not payments:
-            return await callback.message.edit_text(
+            return await callback.message.answer(
                 "✅ *Guruhga qo'shilish kutilayotgan to'lovlar yo'q*\n\n"
                 "Oxirgi 3 kun ichida yangi to'lovlar topilmadi.",
                 parse_mode="Markdown"
             )
         
-        lines = [f"🆕 *Guruhga qo'shilish kutilayotganlar*: {len(payments)} ta\n"]
+        titles = dict(await resolve_group_titles())
         
-        for row in payments[:10]:
+        await callback.message.answer(f"🆕 *Guruhga qo'shilish kutilayotganlar*: {len(payments)} ta\n", parse_mode="Markdown")
+        
+        for row in payments:
+            pid = row['id']
             uid = row['user_id']
-            fullname = row['full_name'] or "Nomsiz"
+            username = row['username']
+            full_name = row['full_name'] or "Nomsiz"
             phone = row['phone'] or "N/A"
-            created_str = (datetime.utcfromtimestamp(row['created_at']) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M")
-            user_link = f"[{fullname}](tg://user?id={uid})"
+            photo_file_id = row['photo_file']
+            agreed_at = row['agreed_at']
+            gid = row['group_id']
             
-            lines.append(f"• {user_link}")
-            lines.append(f"  📞 {phone}")
-            lines.append(f"  📅 {created_str}\n")
+            if isinstance(agreed_at, str):
+                try:
+                    agreed_at = int(agreed_at)
+                except ValueError:
+                    agreed_at = None
+            contract_date = (datetime.utcfromtimestamp(agreed_at) + TZ_OFFSET).strftime("%Y-%m-%d") if agreed_at and isinstance(agreed_at, int) else "yo'q"
+            
+            gtitle = titles.get(gid, str(gid)) if gid else "Guruh tanlanmagan"
+            kb = approve_keyboard(pid)
+            chat_link = f"📧 [{username}](tg://user?id={uid})" if username else f"📧 [Chat ochish](tg://user?id={uid})"
+            
+            caption = (
+                f"⏳ *Kutilayotgan to'lov*\n\n"
+                f"👤 {full_name}\n"
+                f"{chat_link}\n"
+                f"📞 {phone}\n"
+                f"👥 {gtitle}\n"
+                f"📄 Shartnoma: {contract_date}\n"
+                f"🆔 User ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`"
+            )
+            
+            if photo_file_id:
+                await callback.message.answer_photo(photo_file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+            else:
+                await callback.message.answer(caption, reply_markup=kb, parse_mode="Markdown")
         
-        if len(payments) > 10:
-            lines.append(f"... va yana {len(payments)-10} ta")
-        
-        await callback.message.edit_text("\n".join(lines), parse_mode="Markdown")
         await callback.answer()
         
     except Exception as e:
@@ -2295,7 +2320,7 @@ async def cb_pending_initial(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "pay_pending_renewal")
 async def cb_pending_renewal(callback: CallbackQuery):
-    """Obuna yangilash to'lovlari - RBAC filter bilan."""
+    """Obuna yangilash to'lovlari - RBAC filter bilan - cheki rasm bilan."""
     admin_id = callback.from_user.id
     allowed_groups = await get_allowed_groups(admin_id)
     is_super = is_super_admin(admin_id)
@@ -2304,25 +2329,26 @@ async def cb_pending_renewal(callback: CallbackQuery):
         return await callback.answer("❌ Sizga hech qanday guruh tayinlanmagan!", show_alert=True)
     
     try:
+        await callback.message.delete()
         three_days_ago = int(datetime.utcnow().timestamp()) - (3 * 24 * 60 * 60)
         
         async with db_pool.acquire() as conn:
             if is_super:
                 payments = await conn.fetch("""
-                    SELECT p.id, p.user_id, p.created_at,
-                           u.username, u.full_name, u.phone
+                    SELECT p.id, p.user_id, p.photo_file, p.created_at,
+                           u.username, u.full_name, u.phone, u.group_id
                     FROM payments p
                     LEFT JOIN users u ON p.user_id = u.user_id
                     WHERE p.status = 'pending' 
                           AND p.created_at >= $1
                           AND p.payment_type = 'renewal'
                     ORDER BY p.created_at DESC
-                    LIMIT 20
+                    LIMIT 10
                 """, three_days_ago)
             else:
                 payments = await conn.fetch("""
-                    SELECT p.id, p.user_id, p.created_at,
-                           u.username, u.full_name, u.phone
+                    SELECT p.id, p.user_id, p.photo_file, p.created_at,
+                           u.username, u.full_name, u.phone, u.group_id
                     FROM payments p
                     LEFT JOIN users u ON p.user_id = u.user_id
                     WHERE p.status = 'pending' 
@@ -2333,33 +2359,48 @@ async def cb_pending_renewal(callback: CallbackQuery):
                               OR EXISTS (SELECT 1 FROM user_groups WHERE user_id = p.user_id AND group_id = ANY($2))
                           )
                     ORDER BY p.created_at DESC
-                    LIMIT 20
+                    LIMIT 10
                 """, three_days_ago, allowed_groups)
         
         if not payments:
-            return await callback.message.edit_text(
+            return await callback.message.answer(
                 "✅ *Obuna yangilash kutilayotgan to'lovlar yo'q*\n\n"
                 "Oxirgi 3 kun ichida yangilanish to'lovlari topilmadi.",
                 parse_mode="Markdown"
             )
         
-        lines = [f"🔄 *Obuna yangilash kutilayotganlar*: {len(payments)} ta\n"]
+        titles = dict(await resolve_group_titles())
         
-        for row in payments[:10]:
+        await callback.message.answer(f"🔄 *Obuna yangilash kutilayotganlar*: {len(payments)} ta\n", parse_mode="Markdown")
+        
+        for row in payments:
+            pid = row['id']
             uid = row['user_id']
-            fullname = row['full_name'] or "Nomsiz"
+            username = row['username']
+            full_name = row['full_name'] or "Nomsiz"
             phone = row['phone'] or "N/A"
-            created_str = (datetime.utcfromtimestamp(row['created_at']) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M")
-            user_link = f"[{fullname}](tg://user?id={uid})"
+            photo_file_id = row['photo_file']
+            gid = row['group_id']
             
-            lines.append(f"• {user_link}")
-            lines.append(f"  📞 {phone}")
-            lines.append(f"  📅 {created_str}\n")
+            gtitle = titles.get(gid, str(gid)) if gid else "Guruh noma'lum"
+            kb = approve_keyboard(pid)
+            chat_link = f"📧 [{username}](tg://user?id={uid})" if username else f"📧 [Chat ochish](tg://user?id={uid})"
+            
+            caption = (
+                f"🔄 *Obuna yangilash to'lovi*\n\n"
+                f"👤 {full_name}\n"
+                f"{chat_link}\n"
+                f"📞 {phone}\n"
+                f"👥 {gtitle}\n"
+                f"🆔 User ID: `{uid}`\n"
+                f"💳 Payment ID: `{pid}`"
+            )
+            
+            if photo_file_id:
+                await callback.message.answer_photo(photo_file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
+            else:
+                await callback.message.answer(caption, reply_markup=kb, parse_mode="Markdown")
         
-        if len(payments) > 10:
-            lines.append(f"... va yana {len(payments)-10} ta")
-        
-        await callback.message.edit_text("\n".join(lines), parse_mode="Markdown")
         await callback.answer()
         
     except Exception as e:
