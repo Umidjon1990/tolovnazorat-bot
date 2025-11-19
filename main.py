@@ -5265,19 +5265,34 @@ async def on_photo(m: Message):
                 parse_mode="HTML"
             )
             
-            # User ma'lumotlarini olish
+            # MAJBURIY: Telegram'dan user ma'lumotlarini olish
+            username, telegram_fullname = await fetch_user_profile(uid)
+            
+            # Database'dan ma'lumotlarni olish
             user_row = await get_user(uid)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-            fullname = user_row[4] if user_row and len(user_row) > 4 else "Noma'lum"
             
-            # Telegram'dan profil nomini olish
-            username, full_name = await fetch_user_profile(uid)
+            # Agar database'da full_name bo'sh bo'lsa, Telegram'dan olingan nomni ishlatamiz va saqlaymiz
+            if not user_row or not user_row[4]:
+                # User ma'lumotlarini yangilash
+                if user_row:
+                    await upsert_user(
+                        uid=uid,
+                        username=username,
+                        full_name=telegram_fullname,
+                        group_id=user_row[1],  # Mavjud group_id
+                        expires_at=user_row[2]  # Mavjud expires_at
+                    )
+                fullname = telegram_fullname
+            else:
+                fullname = user_row[4]
+            
             chat_link = f"📧 [{username}](tg://user?id={uid})" if username else f"📧 [Chat ochish](tg://user?id={uid})"
             
             kb = approve_keyboard(pid)
             caption = (
                 f"🔄 *YANGILANISH TO'LOVI*\n\n"
-                f"👤 {fullname}\n"
+                f"👤 {fullname or telegram_fullname or 'Noma\'lum'}\n"
                 f"{chat_link}\n"
                 f"📱 Telefon: {phone}\n"
                 f"🆔 ID: `{uid}`\n"
@@ -5322,20 +5337,35 @@ async def on_photo(m: Message):
             parse_mode="HTML"
         )
         
-        # User ma'lumotlarini olish
+        # MAJBURIY: Telegram'dan user ma'lumotlarini olish
+        username, telegram_fullname = await fetch_user_profile(m.from_user.id)
+        
+        # Database'dan telefon raqamni olish
         user_row = await get_user(m.from_user.id)
         phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-        fullname = user_row[4] if user_row and len(user_row) > 4 else "Noma'lum"
         
-        # Telegram'dan profil nomini olish (har doim yangi)
-        username, full_name = await fetch_user_profile(m.from_user.id)
+        # Agar database'da full_name bo'sh bo'lsa yoki user yo'q bo'lsa, 
+        # Telegram'dan olingan nomni ishlatamiz va database'ga saqlaymiz
+        if not user_row or not user_row[4]:
+            # User ma'lumotlarini yangilash yoki yaratish
+            await upsert_user(
+                uid=m.from_user.id,
+                username=username,
+                full_name=telegram_fullname,
+                group_id=None,  # Hali guruhga qo'shilmagan
+                expires_at=None
+            )
+            fullname = telegram_fullname
+        else:
+            fullname = user_row[4]
+        
         # Username bor bo'lsa username ko'rsatamiz, yo'qsa "Chat ochish" - ikkalasi ham link
         chat_link = f"📧 [{username}](tg://user?id={m.from_user.id})" if username else f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
         
         kb = approve_keyboard(pid)
         caption = (
             f"🧾 *Yangi to'lov cheki*\n\n"
-            f"👤 {fullname}\n"
+            f"👤 {fullname or telegram_fullname or 'Noma\'lum'}\n"
             f"{chat_link}\n"
             f"📱 Telefon: {phone}\n"
             f"🆔 ID: `{m.from_user.id}`\n"
