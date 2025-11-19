@@ -2227,8 +2227,7 @@ async def cmd_payments(m: Message):
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🆕 Guruhga qo'shilish kutilmoqda", callback_data="pay_pending_initial")],
-        [InlineKeyboardButton(text="🔄 Obuna yangilash kutilmoqda", callback_data="pay_pending_renewal")],
-        [InlineKeyboardButton(text="✅ Tasdiqlangan to'lovlar (3 kun)", callback_data="pay_approved")]
+        [InlineKeyboardButton(text="🔄 Obuna yangilash kutilmoqda", callback_data="pay_pending_renewal")]
     ])
     
     await m.answer(
@@ -2405,85 +2404,6 @@ async def cb_pending_renewal(callback: CallbackQuery):
         
     except Exception as e:
         logger.error(f"Error in cb_pending_renewal: {e}")
-        await callback.answer("❌ Xatolik yuz berdi!", show_alert=True)
-
-@dp.callback_query(F.data == "pay_approved")
-async def cb_approved_payments(callback: CallbackQuery):
-    """Tasdiqlangan to'lovlar (oxirgi 3 kun) - RBAC filter bilan."""
-    admin_id = callback.from_user.id
-    allowed_groups = await get_allowed_groups(admin_id)
-    is_super = is_super_admin(admin_id)
-    
-    if not is_super and not allowed_groups:
-        return await callback.answer("❌ Sizga hech qanday guruh tayinlanmagan!", show_alert=True)
-    
-    try:
-        now = int(datetime.utcnow().timestamp())
-        three_days_ago = now - (3 * 24 * 60 * 60)
-        
-        async with db_pool.acquire() as conn:
-            if is_super:
-                payments = await conn.fetch("""
-                    SELECT p.id, p.user_id, p.created_at, p.payment_type,
-                           u.username, u.full_name, u.phone, u.group_id
-                    FROM payments p
-                    LEFT JOIN users u ON p.user_id = u.user_id
-                    WHERE p.status = 'approved' 
-                          AND p.created_at >= $1
-                    ORDER BY p.created_at DESC
-                    LIMIT 20
-                """, three_days_ago)
-            else:
-                payments = await conn.fetch("""
-                    SELECT p.id, p.user_id, p.created_at, p.payment_type,
-                           u.username, u.full_name, u.phone, u.group_id
-                    FROM payments p
-                    LEFT JOIN users u ON p.user_id = u.user_id
-                    WHERE p.status = 'approved' 
-                          AND p.created_at >= $1
-                          AND (
-                              u.group_id = ANY($2)
-                              OR EXISTS (SELECT 1 FROM user_groups WHERE user_id = p.user_id AND group_id = ANY($2))
-                          )
-                    ORDER BY p.created_at DESC
-                    LIMIT 20
-                """, three_days_ago, allowed_groups)
-        
-        if not payments:
-            return await callback.message.edit_text(
-                "✅ *Tasdiqlangan to'lovlar yo'q*\n\n"
-                "Oxirgi 3 kun ichida tasdiqlangan to'lovlar topilmadi.",
-                parse_mode="Markdown"
-            )
-        
-        titles = dict(await resolve_group_titles())
-        lines = [f"✅ *Tasdiqlangan to'lovlar*: {len(payments)} ta\n"]
-        
-        for row in payments[:10]:
-            uid = row['user_id']
-            fullname = row['full_name'] or "Nomsiz"
-            phone = row['phone'] or "N/A"
-            gid = row['group_id']
-            payment_type = row['payment_type'] or 'initial'
-            created_str = (datetime.utcfromtimestamp(row['created_at']) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M")
-            
-            type_emoji = "🔄" if payment_type == 'renewal' else "🆕"
-            gtitle = titles.get(gid, str(gid)) if gid else "Guruh tanlanmagan"
-            user_link = f"[{fullname}](tg://user?id={uid})"
-            
-            lines.append(f"{type_emoji} {user_link}")
-            lines.append(f"  📞 {phone}")
-            lines.append(f"  👥 {gtitle}")
-            lines.append(f"  📅 {created_str}\n")
-        
-        if len(payments) > 10:
-            lines.append(f"... va yana {len(payments)-10} ta")
-        
-        await callback.message.edit_text("\n".join(lines), parse_mode="Markdown")
-        await callback.answer()
-        
-    except Exception as e:
-        logger.error(f"Error in cb_approved_payments: {e}")
         await callback.answer("❌ Xatolik yuz berdi!", show_alert=True)
 
 @dp.message(Command("groups"))
@@ -4487,8 +4407,7 @@ async def admin_payments_button(m: Message):
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🆕 Guruhga qo'shilish kutilmoqda", callback_data="pay_pending_initial")],
-        [InlineKeyboardButton(text="🔄 Obuna yangilash kutilmoqda", callback_data="pay_pending_renewal")],
-        [InlineKeyboardButton(text="✅ Tasdiqlangan to'lovlar (3 kun)", callback_data="pay_approved")]
+        [InlineKeyboardButton(text="🔄 Obuna yangilash kutilmoqda", callback_data="pay_pending_renewal")]
     ])
     
     await m.answer(
@@ -4871,6 +4790,58 @@ async def admin_edit_contract_button(m: Message):
 
 @dp.message(F.text)
 async def on_admin_date_handler(m: Message):
+    # Sana kiritish (to'lov tasdiqlash yoki registration uchun) - OLDIN TEKSHIRILISHI KERAK!
+    if m.from_user.id in WAIT_DATE_FOR:
+        try:
+            raw = (m.text or "").strip().replace("/", "-")
+            if not DATE_RE.match(raw):
+                return await m.answer("❗ Format noto'g'ri. To'g'ri ko'rinish: 2025-10-01")
+            try:
+                start_dt = datetime.strptime(raw, "%Y-%m-%d")
+            except Exception:
+                return await m.answer("❗ Sana tushunilmadi. Misol: 2025-10-01")
+            
+            id_value = WAIT_DATE_FOR.pop(m.from_user.id, None)
+            if not id_value:
+                return await m.answer("Sessiya topilmadi.")
+            
+            # Payment ID yoki User ID ekanligini tekshirish
+            payment_row = await get_payment(id_value)
+            
+            if payment_row:
+                # payment_type ni olish
+                _pid, _uid, _status, _, payment_type = payment_row
+                
+                # RENEWAL PAYMENT - sana tanlash kerak emas!
+                if payment_type == 'renewal':
+                    await m.answer(
+                        "⚠️ <b>Xatolik!</b>\n\n"
+                        "Renewal uchun sana tanlash kerak emas.\n"
+                        "Iltimos, to'lovni <b>'Approve (hoziroq)'</b> tugmasi bilan tasdiqlang.",
+                        parse_mode="HTML"
+                    )
+                    return
+                
+                # INITIAL PAYMENT - guruh tanlash
+                iso = start_dt.isoformat()
+                await m.answer("✅ Sana qabul qilindi.\nEndi guruh(lar)ga qo'shish usulini tanlang:", reply_markup=multi_select_entry_kb(id_value, with_date_iso=iso))
+            else:
+                # Bu registration tasdiqlash
+                user_id = id_value
+                start_ts = int(start_dt.timestamp())
+                end_ts = start_ts + (30 * 24 * 60 * 60)
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET expires_at = $1 WHERE user_id = $2",
+                        end_ts, user_id
+                    )
+                logger.info(f"Registration date confirmed for user {user_id}: {start_dt}")
+                await m.answer(f"✅ Boshlanish sanasi qabul qilindi: {start_dt.strftime('%Y-%m-%d')}\nHozir guruhga qo'shilishingiz mumkin.")
+        except Exception as e:
+            logger.error(f"Error in date handler: {e}")
+            await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+        return
+    
     # Shartnoma matnini tahrirlash (admin)
     if m.from_user.id in WAIT_CONTRACT_EDIT:
         try:
@@ -5023,91 +4994,6 @@ async def on_admin_date_handler(m: Message):
         except Exception as e:
             logger.error(f"Error processing fullname: {e}")
             await m.answer("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
-        return
-    
-    # Sana kiritish (to'lov tasdiqlash yoki registration uchun)
-    if m.from_user.id in WAIT_DATE_FOR:
-        try:
-            raw = (m.text or "").strip().replace("/", "-")
-            if not DATE_RE.match(raw):
-                return await m.answer("❗ Format noto'g'ri. To'g'ri ko'rinish: 2025-10-01")
-            try:
-                start_dt = datetime.strptime(raw, "%Y-%m-%d")
-            except Exception:
-                return await m.answer("❗ Sana tushunilmadi. Misol: 2025-10-01")
-            
-            id_value = WAIT_DATE_FOR.pop(m.from_user.id, None)
-            if not id_value:
-                return await m.answer("Sessiya topilmadi.")
-            
-            # Payment ID yoki User ID ekanligini tekshirish
-            payment_row = await get_payment(id_value)
-            
-            if payment_row:
-                # payment_type ni olish
-                _pid, _uid, _status, _, payment_type = payment_row
-                
-                # RENEWAL PAYMENT - sana tanlash kerak emas!
-                if payment_type == 'renewal':
-                    await m.answer(
-                        "⚠️ <b>Xatolik!</b>\n\n"
-                        "Renewal uchun sana tanlash kerak emas.\n"
-                        "Iltimos, to'lovni <b>'Approve (hoziroq)'</b> tugmasi bilan tasdiqlang.",
-                        parse_mode="HTML"
-                    )
-                    return
-                
-                # INITIAL PAYMENT - guruh tanlash
-                iso = start_dt.isoformat()
-                await m.answer("✅ Sana qabul qilindi.\nEndi guruh(lar)ga qo'shish usulini tanlang:", reply_markup=multi_select_entry_kb(id_value, with_date_iso=iso))
-            else:
-                # Bu registration tasdiqlash
-                user_id = id_value
-                expires_at = int((start_dt + timedelta(days=SUBSCRIPTION_DAYS)).timestamp())
-                
-                # User ma'lumotlarini olish
-                user_row = await get_user(user_id)
-                username, fullname = await fetch_user_profile(user_id)
-                phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
-                
-                # Birinchi guruhga qo'shish
-                if GROUP_IDS:
-                    primary_gid = GROUP_IDS[0]
-                    await upsert_user(uid=user_id, username=username, full_name=fullname, group_id=primary_gid, expires_at=expires_at)
-                    
-                    human_exp = (datetime.utcfromtimestamp(expires_at) + TZ_OFFSET).strftime("%Y-%m-%d")
-                    human_start = (start_dt + TZ_OFFSET).strftime("%Y-%m-%d")
-                    
-                    # User'ga xabar
-                    try:
-                        await bot.send_message(
-                            user_id,
-                            f"✅ *Tabriklaymiz! Ro'yxatdan o'tdingiz!*\n\n"
-                            f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun\n"
-                            f"⏳ Tugash sanasi: {human_exp}\n\n"
-                            f"🎓 Darslarni yaxshi o'zlashtirishingizni tilaymiz!",
-                            parse_mode="Markdown"
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to notify user {user_id}: {e}")
-                    
-                    # Admin'ga xabar
-                    await m.answer(
-                        f"✅ *TASDIQLANDI*\n\n"
-                        f"👤 {fullname}\n"
-                        f"📞 Telefon: {phone}\n"
-                        f"📅 Obuna: {human_start} dan {SUBSCRIPTION_DAYS} kun\n"
-                        f"⏳ Tugash: {human_exp}",
-                        parse_mode="Markdown"
-                    )
-                    
-                    logger.info(f"Registration approved with custom date for user {user_id} by admin {m.from_user.id}")
-                else:
-                    await m.answer("❗ Guruhlar topilmadi")
-                    
-        except Exception as e:
-            logger.error(f"Error in on_admin_date_handler: {e}")
-            await m.answer("Xatolik yuz berdi")
         return
     
     if m.from_user.id in WAIT_CONTACT_FOR:
