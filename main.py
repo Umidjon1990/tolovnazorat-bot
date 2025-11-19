@@ -682,10 +682,11 @@ async def expired_users():
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT user_id, group_id, expires_at 
-            FROM users 
-            WHERE expires_at > 0 AND expires_at <= $1
-              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $2)
+            SELECT u.user_id, u.group_id, u.expires_at 
+            FROM users u
+            INNER JOIN groups g ON u.group_id = g.group_id
+            WHERE u.expires_at > 0 AND u.expires_at <= $1
+              AND (u.last_warning_sent_at IS NULL OR u.last_warning_sent_at < $2)
         """, now, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
@@ -712,10 +713,11 @@ async def soon_expiring_users(days: int):
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT user_id, group_id, expires_at 
-            FROM users 
-            WHERE expires_at > $1 AND expires_at <= $2
-              AND (last_warning_sent_at IS NULL OR last_warning_sent_at < $3)
+            SELECT u.user_id, u.group_id, u.expires_at 
+            FROM users u
+            INNER JOIN groups g ON u.group_id = g.group_id
+            WHERE u.expires_at > $1 AND u.expires_at <= $2
+              AND (u.last_warning_sent_at IS NULL OR u.last_warning_sent_at < $3)
         """, now, upper, threshold_24h)
         return [(r['user_id'], r['group_id'], r['expires_at']) for r in rows]
 
