@@ -2406,6 +2406,82 @@ async def cb_pending_renewal(callback: CallbackQuery):
         logger.error(f"Error in cb_pending_renewal: {e}")
         await callback.answer("❌ Xatolik yuz berdi!", show_alert=True)
 
+@dp.callback_query(F.data == "pay_approved")
+async def cb_approved_payments(callback: CallbackQuery):
+    """Tasdiqlangan to'lovlar (oxirgi 3 kun) - RBAC filter bilan."""
+    admin_id = callback.from_user.id
+    allowed_groups = await get_allowed_groups(admin_id)
+    is_super = is_super_admin(admin_id)
+    
+    if not is_super and not allowed_groups:
+        return await callback.answer("❌ Sizga hech qanday guruh tayinlanmagan!", show_alert=True)
+    
+    try:
+        now = int(datetime.utcnow().timestamp())
+        three_days_ago = now - (3 * 24 * 60 * 60)
+        
+        async with db_pool.acquire() as conn:
+            if is_super:
+                payments = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at, p.payment_type,
+                           u.username, u.full_name, u.phone, u.group_id
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'approved' 
+                          AND p.created_at >= $1
+                    ORDER BY p.created_at DESC
+                    LIMIT 20
+                """, three_days_ago)
+            else:
+                payments = await conn.fetch("""
+                    SELECT p.id, p.user_id, p.created_at, p.payment_type,
+                           u.username, u.full_name, u.phone, u.group_id
+                    FROM payments p
+                    LEFT JOIN users u ON p.user_id = u.user_id
+                    WHERE p.status = 'approved' 
+                          AND p.created_at >= $1
+                          AND u.group_id = ANY($2)
+                    ORDER BY p.created_at DESC
+                    LIMIT 20
+                """, three_days_ago, allowed_groups)
+        
+        if not payments:
+            return await callback.message.edit_text(
+                "✅ *Tasdiqlangan to'lovlar yo'q*\n\n"
+                "Oxirgi 3 kun ichida tasdiqlangan to'lovlar topilmadi.",
+                parse_mode="Markdown"
+            )
+        
+        titles = dict(await resolve_group_titles())
+        lines = [f"✅ *Tasdiqlangan to'lovlar*: {len(payments)} ta\n"]
+        
+        for row in payments[:10]:
+            uid = row['user_id']
+            fullname = row['full_name'] or "Nomsiz"
+            phone = row['phone'] or "N/A"
+            gid = row['group_id']
+            payment_type = row['payment_type'] or 'initial'
+            created_str = (datetime.utcfromtimestamp(row['created_at']) + TZ_OFFSET).strftime("%Y-%m-%d %H:%M")
+            
+            type_emoji = "🔄" if payment_type == 'renewal' else "🆕"
+            gtitle = titles.get(gid, str(gid)) if gid else "Guruh tanlanmagan"
+            user_link = f"[{fullname}](tg://user?id={uid})"
+            
+            lines.append(f"{type_emoji} {user_link}")
+            lines.append(f"  📞 {phone}")
+            lines.append(f"  👥 {gtitle}")
+            lines.append(f"  📅 {created_str}\n")
+        
+        if len(payments) > 10:
+            lines.append(f"... va yana {len(payments)-10} ta")
+        
+        await callback.message.edit_text("\n".join(lines), parse_mode="Markdown")
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in cb_approved_payments: {e}")
+        await callback.answer("❌ Xatolik yuz berdi!", show_alert=True)
+
 @dp.message(Command("groups"))
 async def cmd_groups(m: Message):
     """Barcha guruhlarni ko'rsatish (database'dan) - nomlar bilan."""
@@ -4401,13 +4477,14 @@ async def admin_pending_button(m: Message):
 
 @dp.message(F.text == "💳 To'lovlar")
 async def admin_payments_button(m: Message):
-    """Admin To'lovlar tugmasi handleri - yangi 3 tugmali menu."""
+    """Admin To'lovlar tugmasi handleri - 3 tugmali menu."""
     if not await is_active_admin(m.from_user.id):
         return
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🆕 Guruhga qo'shilish kutilmoqda", callback_data="pay_pending_initial")],
-        [InlineKeyboardButton(text="🔄 Obuna yangilash kutilmoqda", callback_data="pay_pending_renewal")]
+        [InlineKeyboardButton(text="🔄 Obuna yangilash kutilmoqda", callback_data="pay_pending_renewal")],
+        [InlineKeyboardButton(text="✅ Tasdiqlangan to'lovlar (3 kun)", callback_data="pay_approved")]
     ])
     
     await m.answer(
