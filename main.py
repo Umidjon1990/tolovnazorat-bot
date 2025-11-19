@@ -5265,34 +5265,46 @@ async def on_photo(m: Message):
                 parse_mode="HTML"
             )
             
-            # MAJBURIY: Telegram'dan user ma'lumotlarini olish
-            username, telegram_fullname = await fetch_user_profile(uid)
-            
-            # Database'dan ma'lumotlarni olish
+            # Database'dan mavjud ma'lumotlarni olish
             user_row = await get_user(uid)
             phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
             
-            # Agar database'da full_name bo'sh bo'lsa, Telegram'dan olingan nomni ishlatamiz va saqlaymiz
-            if not user_row or not user_row[4]:
-                # User ma'lumotlarini yangilash
-                if user_row:
-                    await upsert_user(
-                        uid=uid,
-                        username=username,
-                        full_name=telegram_fullname,
-                        group_id=user_row[1],  # Mavjud group_id
-                        expires_at=user_row[2]  # Mavjud expires_at
-                    )
-                fullname = telegram_fullname
-            else:
-                fullname = user_row[4]
+            # Mavjud ma'lumotlarni saqlash (agar user mavjud bo'lsa)
+            existing_username = user_row[3] if user_row else None
+            existing_group_id = user_row[1] if user_row else None
+            existing_expires_at = user_row[2] if user_row else None
+            existing_fullname = user_row[4] if user_row else None
             
-            chat_link = f"📧 [{username}](tg://user?id={uid})" if username else f"📧 [Chat ochish](tg://user?id={uid})"
+            # MAJBURIY: Telegram'dan user ma'lumotlarini olish (error-safe)
+            try:
+                username, telegram_fullname = await fetch_user_profile(uid)
+                # Empty string'ni None ga normalize qilish
+                username = username if username and username.strip() else None
+                telegram_fullname = telegram_fullname if telegram_fullname and telegram_fullname.strip() else None
+            except Exception as e:
+                logger.warning(f"Failed to fetch Telegram profile for user {uid}: {e}")
+                # Telegram API fail bo'lsa, database ma'lumotlarini ishlatamiz
+                username = None
+                telegram_fullname = None
+            
+            # HAR DOIM ma'lumotni database'ga yangilash/yaratish
+            await upsert_user(
+                uid=uid,
+                username=username or existing_username,  # Telegram None/empty qaytarsa, mavjud username'ni saqlab qolish
+                full_name=telegram_fullname or existing_fullname or "Foydalanuvchi",  # Fallback chain
+                group_id=existing_group_id,  # Mavjud group_id
+                expires_at=existing_expires_at  # Mavjud expires_at
+            )
+            
+            # Admin'ga ko'rsatish uchun final ma'lumotlar
+            display_name = telegram_fullname or existing_fullname or "Noma'lum"
+            # Chat link: constant label ishlatamiz (Markdown-safe)
+            chat_link = f"📧 [Chat ochish](tg://user?id={uid})"
             
             kb = approve_keyboard(pid)
             caption = (
                 f"🔄 *YANGILANISH TO'LOVI*\n\n"
-                f"👤 {fullname or telegram_fullname or 'Noma\'lum'}\n"
+                f"👤 {display_name}\n"
                 f"{chat_link}\n"
                 f"📱 Telefon: {phone}\n"
                 f"🆔 ID: `{uid}`\n"
@@ -5337,35 +5349,46 @@ async def on_photo(m: Message):
             parse_mode="HTML"
         )
         
-        # MAJBURIY: Telegram'dan user ma'lumotlarini olish
-        username, telegram_fullname = await fetch_user_profile(m.from_user.id)
-        
-        # Database'dan telefon raqamni olish
+        # Database'dan mavjud ma'lumotlarni olish
         user_row = await get_user(m.from_user.id)
         phone = user_row[5] if user_row and len(user_row) > 5 else "yo'q"
         
-        # Agar database'da full_name bo'sh bo'lsa yoki user yo'q bo'lsa, 
-        # Telegram'dan olingan nomni ishlatamiz va database'ga saqlaymiz
-        if not user_row or not user_row[4]:
-            # User ma'lumotlarini yangilash yoki yaratish
-            await upsert_user(
-                uid=m.from_user.id,
-                username=username,
-                full_name=telegram_fullname,
-                group_id=None,  # Hali guruhga qo'shilmagan
-                expires_at=None
-            )
-            fullname = telegram_fullname
-        else:
-            fullname = user_row[4]
+        # Mavjud ma'lumotlarni saqlash (agar user mavjud bo'lsa)
+        existing_username = user_row[3] if user_row else None
+        existing_group_id = user_row[1] if user_row else None
+        existing_expires_at = user_row[2] if user_row else None
+        existing_fullname = user_row[4] if user_row else None
         
-        # Username bor bo'lsa username ko'rsatamiz, yo'qsa "Chat ochish" - ikkalasi ham link
-        chat_link = f"📧 [{username}](tg://user?id={m.from_user.id})" if username else f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
+        # MAJBURIY: Telegram'dan user ma'lumotlarini olish (error-safe)
+        try:
+            username, telegram_fullname = await fetch_user_profile(m.from_user.id)
+            # Empty string'ni None ga normalize qilish
+            username = username if username and username.strip() else None
+            telegram_fullname = telegram_fullname if telegram_fullname and telegram_fullname.strip() else None
+        except Exception as e:
+            logger.warning(f"Failed to fetch Telegram profile for user {m.from_user.id}: {e}")
+            # Telegram API fail bo'lsa, database ma'lumotlarini ishlatamiz
+            username = None
+            telegram_fullname = None
+        
+        # HAR DOIM ma'lumotni database'ga saqlash/yaratish, lekin mavjud ma'lumotlarni saqlab qolish
+        await upsert_user(
+            uid=m.from_user.id,
+            username=username or existing_username,  # Telegram None/empty qaytarsa, mavjud username'ni saqlab qolish
+            full_name=telegram_fullname or existing_fullname or "Foydalanuvchi",  # Fallback chain
+            group_id=existing_group_id,  # Mavjud group_id'ni saqlab qolish
+            expires_at=existing_expires_at  # Mavjud expires_at'ni saqlab qolish
+        )
+        
+        # Admin'ga ko'rsatish uchun final ma'lumotlar
+        display_name = telegram_fullname or existing_fullname or "Noma'lum"
+        # Chat link: constant label ishlatamiz (Markdown-safe)
+        chat_link = f"📧 [Chat ochish](tg://user?id={m.from_user.id})"
         
         kb = approve_keyboard(pid)
         caption = (
             f"🧾 *Yangi to'lov cheki*\n\n"
-            f"👤 {fullname or telegram_fullname or 'Noma\'lum'}\n"
+            f"👤 {display_name}\n"
             f"{chat_link}\n"
             f"📱 Telefon: {phone}\n"
             f"🆔 ID: `{m.from_user.id}`\n"
