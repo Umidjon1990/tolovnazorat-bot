@@ -6609,57 +6609,137 @@ async def cb_group_delete_cancel(c: CallbackQuery):
     )
     await c.answer("Bekor qilindi")
 
+@dp.callback_query(F.data.startswith("missing_keep:"))
+async def cb_missing_keep(c: CallbackQuery):
+    """Topilmagan guruhni saqlash (xabar ignore)."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        gid = int(c.data.split(":")[1])
+        
+        # Cache'dan o'chirish - keyingi safar yana xabar keladi
+        if gid in _REMOVED_GROUPS_CACHE:
+            _REMOVED_GROUPS_CACHE.remove(gid)
+        
+        await c.message.edit_text(
+            f"✅ <b>Guruh saqlandi</b>\n\n"
+            f"🆔 Guruh ID: <code>{gid}</code>\n\n"
+            f"Guruh database'da qoldirildi. Agar bot keyinroq guruhga kira olsa, ishlay beradi.\n\n"
+            f"💡 Agar guruh haqiqatdan o'chirilgan bo'lsa, keyinroq qo'lda o'chirishingiz mumkin.",
+            parse_mode="HTML"
+        )
+        await c.answer("✅ Saqlandi")
+        logger.info(f"Admin {c.from_user.id} chose to keep missing group {gid}")
+    except Exception as e:
+        logger.error(f"Error in cb_missing_keep: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
+@dp.callback_query(F.data.startswith("missing_delete:"))
+async def cb_missing_delete(c: CallbackQuery):
+    """Topilmagan guruhni database'dan o'chirish."""
+    if not await is_active_admin(c.from_user.id):
+        return await c.answer("⛔ Faqat adminlar uchun", show_alert=True)
+    
+    try:
+        gid = int(c.data.split(":")[1])
+        
+        # Database'dan o'chirish (transaction bilan)
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT name FROM groups WHERE group_id = $1", gid)
+            if not row:
+                return await c.answer("Guruh allaqachon o'chirilgan", show_alert=True)
+            
+            group_name = row['name']
+            
+            # TRANSACTION: Barcha ma'lumotlarni o'chirish
+            async with conn.transaction():
+                # User subscriptions
+                await conn.execute("DELETE FROM user_groups WHERE group_id = $1", gid)
+                
+                # Admin managed_groups arraydan o'chirish
+                await conn.execute("""
+                    UPDATE admins 
+                    SET managed_groups = array_remove(managed_groups, $1)
+                    WHERE $1 = ANY(managed_groups)
+                """, gid)
+                
+                # Guruhning o'zini o'chirish
+                await conn.execute("DELETE FROM groups WHERE group_id = $1", gid)
+            
+            # Cache'ni yangilash
+            rows = await conn.fetch("SELECT group_id FROM groups ORDER BY id")
+            new_group_ids = [row['group_id'] for row in rows]
+        
+        # Global cache yangilash
+        global GROUP_IDS
+        GROUP_IDS = new_group_ids
+        logger.info(f"GROUP_IDS refreshed after missing group deletion: {GROUP_IDS}")
+        
+        await c.message.edit_text(
+            f"✅ <b>Guruh o'chirildi!</b>\n\n"
+            f"📋 Nom: {group_name}\n"
+            f"🆔 ID: <code>{gid}</code>\n\n"
+            f"Guruh database'dan butunlay o'chirildi.",
+            parse_mode="HTML"
+        )
+        await c.answer("✅ O'chirildi")
+        logger.info(f"Admin {c.from_user.id} deleted missing group {gid} ({group_name})")
+    except Exception as e:
+        logger.error(f"Error in cb_missing_delete: {e}")
+        await c.answer("Xatolik yuz berdi", show_alert=True)
+
 _WARNED_CACHE: dict[tuple[int, int, str], int] = {}
 _REMOVED_GROUPS_CACHE: set[int] = set()  # O'chirilgan guruhlar cache'i
 
 async def handle_missing_chat(group_id: int, reason: str = "chat not found"):
-    """Agar guruh topilmasa, database'dan avtomatik o'chirish."""
+    """Agar guruh topilmasa, adminga xabar yuborish (avtomatik o'chirmaslik)."""
     try:
-        # Agar bu guruh allaqachon o'chirilgan bo'lsa, qayta ishlamaslik
+        # Agar bu guruh allaqachon xabar yuborilgan bo'lsa, qayta yubormaslik
         if group_id in _REMOVED_GROUPS_CACHE:
-            logger.debug(f"Group {group_id} already processed for removal, skipping")
+            logger.debug(f"Group {group_id} already notified about missing chat, skipping")
             return
         
-        # Cache'ga qo'shamiz - bir marta ishlasin
+        # Cache'ga qo'shamiz - bir marta xabar yuborish uchun
         _REMOVED_GROUPS_CACHE.add(group_id)
         
-        logger.error(f"Group {group_id} not found in Telegram ({reason}) - removing from database")
+        logger.warning(f"Group {group_id} not found in Telegram ({reason}) - notifying admins")
         
-        # Guruh nomini olish (log uchun)
+        # Guruh nomini olish
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow("SELECT name FROM groups WHERE group_id = $1", group_id)
-            group_name = row['name'] if row else str(group_id)
-            
-            # Database'dan o'chirish
-            await conn.execute("DELETE FROM groups WHERE group_id = $1", group_id)
-            await conn.execute("DELETE FROM user_groups WHERE group_id = $1", group_id)
+            if not row:
+                logger.warning(f"Group {group_id} not found in database either")
+                return
+            group_name = row['name']
         
-        # Global o'zgaruvchilardan o'chirish
-        global GROUP_IDS
-        if group_id in GROUP_IDS:
-            GROUP_IDS.remove(group_id)
-        
-        # Cache'larni tozalash
-        keys_to_remove = [k for k in _WARNED_CACHE.keys() if k[1] == group_id]
-        for k in keys_to_remove:
-            del _WARNED_CACHE[k]
-        
-        logger.info(f"Successfully removed invalid group {group_id} ({group_name}) from database")
+        # Admin tasdiqlash tugmalari
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Guruhni saqlash", callback_data=f"missing_keep:{group_id}"),
+                InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"missing_delete:{group_id}")
+            ]
+        ])
         
         # Super adminlarga FAQAT BIR MARTA xabar yuborish
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(
                     admin_id,
-                    f"⚠️ <b>Guruh avtomatik o'chirildi</b>\n\n"
+                    f"⚠️ <b>Guruhga kirib bo'lmayapti!</b>\n\n"
                     f"📋 Nom: {group_name}\n"
                     f"🆔 ID: <code>{group_id}</code>\n"
                     f"❌ Sabab: {reason}\n\n"
-                    f"Bot guruhga kirib bo'lmadi yoki guruh o'chirilgan.",
+                    f"Bot guruhga kirolmayapti. Ehtimol:\n"
+                    f"• Bot guruhdan chiqarilgan\n"
+                    f"• Guruh o'chirilgan\n"
+                    f"• Vaqtinchalik xatolik\n\n"
+                    f"<b>Nima qilishni tanlang:</b>",
+                    reply_markup=kb,
                     parse_mode="HTML"
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to notify admin {admin_id} about missing group: {e}")
     except Exception as e:
         logger.error(f"Error in handle_missing_chat for group {group_id}: {e}")
 
